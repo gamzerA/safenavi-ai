@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>SafeNavi</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+
+<header class="top-header">
+    <div class="logo">SafeNavi</div>
+    <nav>
+        <a href="/">홈</a>
+        <a href="/safety">안전지수</a>
+        <a href="/shelters">대피소 추천</a>
+        <a href="/guide">행동요령 AI</a>
+        <a href="/share">안심 공유</a>
+    </nav>
+</header>
+
+<main class="container">
+
+    <section class="hero">
+        <div class="hero-text">
+            <p class="badge">AI 기반 생활밀착형 재난 안전 안내 서비스</p>
+            <h1>재난 상황을 이해하고<br>가장 안전한 행동을 안내합니다.</h1>
+            <p class="hero-desc">
+                SafeNavi는 긴급재난문자, 기상정보, 대피소 데이터를 분석하여
+                오늘의 안전지수, 맞춤형 대피소, 행동요령, 가족 안심 공유 문구를 제공합니다.
+            </p>
+
+            <div class="hero-buttons">
+                <a class="btn primary" href="/safety">오늘의 안전지수 확인</a>
+                <a class="btn secondary" href="/shelters">대피소 추천 받기</a>
+            </div>
+        </div>
+
+        <div class="hero-card">
+            <h3>현재 테스트 위치</h3>
+            <p><strong>지역</strong> {{ user_location.region }}</p>
+            <p><strong>위도</strong> {{ user_location.lat }}</p>
+            <p><strong>경도</strong> {{ user_location.lon }}</p>
+            <p class="small-text">
+                실제 서비스에서는 사용자의 현재 위치 또는 지도 선택 위치로 변경할 수 있습니다.
+            </p>
+        </div>
+    </section>
+
+    <section class="feature-grid">
+        <div class="feature-card">
+            <h3>오늘의 안전지수</h3>
+            <p>재난문자, 기상특보, 생활기상지수를 종합하여 위험도를 계산합니다.</p>
+            <a href="/safety">확인하기 →</a>
+        </div>
+
+        <div class="feature-card">
+            <h3>맞춤형 대피소 추천</h3>
+            <p>사용자 위치와 재난 유형을 기준으로 가까운 대피소 TOP 3를 추천합니다.</p>
+            <a href="/shelters">추천받기 →</a>
+        </div>
+
+        <div class="feature-card">
+            <h3>행동요령 RAG AI</h3>
+            <p>자연재난 행동요령 데이터를 기반으로 질문에 맞는 답변을 생성합니다.</p>
+            <a href="/guide">질문하기 →</a>
+        </div>
+
+        <div class="feature-card">
+            <h3>가족 안심 공유</h3>
+            <p>현재 상황과 대피소 정보를 가족에게 보낼 문구로 자동 생성합니다.</p>
+            <a href="/share">문구 만들기 →</a>
+        </div>
+    </section>
+
+</main>
+
+<footer>
+    SafeNavi Capstone Design Project
+</footer>
+
+</body>
+</html>

@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>안심 공유 | SafeNavi</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+
+<header class="top-header">
+    <div class="logo">SafeNavi</div>
+    <nav>
+        <a href="/">홈</a>
+        <a href="/safety">안전지수</a>
+        <a href="/shelters">대피소 추천</a>
+        <a href="/guide">행동요령 AI</a>
+        <a href="/share">안심 공유</a>
+    </nav>
+</header>
+
+<main class="container">
+
+    <section class="page-title">
+        <p class="badge">Safety Share Message</p>
+        <h1>가족 안심 공유 문구</h1>
+        <p>
+            현재 지역의 재난문자와 추천 대피소 정보를 바탕으로
+            가족에게 보낼 안심 공유 문구를 자동 생성합니다.
+        </p>
+    </section>
+
+    <section class="content-card">
+        <h2>공유 정보 입력</h2>
+
+        <form method="post" class="form-grid">
+            <div>
+                <label>현재 상태</label>
+                <input 
+                    type="text" 
+                    name="user_status" 
+                    value="{{ user_status }}" 
+                    placeholder="예: 안전, 이동 중, 대피소 확인 완료"
+                >
+            </div>
+
+            <div>
+                <label>현재 지역</label>
+                <input 
+                    type="text" 
+                    name="user_region" 
+                    value="{{ user_region }}" 
+                    placeholder="예: 경기도 용인시"
+                >
+            </div>
+
+            <div>
+                <label>문구 형태</label>
+                <select name="tone">
+                    <option value="normal" {% if tone == "normal" %}selected{% endif %}>
+                        자세한 문구
+                    </option>
+                    <option value="short" {% if tone == "short" %}selected{% endif %}>
+                        짧은 문구
+                    </option>
+                </select>
+            </div>
+
+            <div class="form-button">
+                <button type="submit" class="btn primary">공유 문구 생성</button>
+            </div>
+        </form>
+    </section>
+
+    {% if error_message %}
+        <div class="alert-box">
+            {{ error_message }}
+        </div>
+    {% endif %}
+
+    {% if not has_generated %}
+        <section class="content-card">
+            <h2>사용 방법</h2>
+            <p>
+                현재 상태와 지역을 확인한 뒤 <strong>공유 문구 생성</strong> 버튼을 눌러주세요.
+            </p>
+            <ul class="info-list">
+                <li>현재 상태 예시: <strong>안전</strong>, <strong>이동 중</strong>, <strong>대피소 확인 완료</strong></li>
+                <li>현재 지역 예시: <strong>경기도 용인시</strong>, <strong>서울특별시 강남구</strong></li>
+                <li>지역 기준으로 관련 재난문자를 확인한 뒤, 가까운 대피소 정보를 함께 표시합니다.</li>
+            </ul>
+        </section>
+    {% endif %}
+
+    {% if has_generated and share_message %}
+        <section class="content-card answer-card">
+            <h2>생성된 공유 문구</h2>
+            <pre class="answer-text">{{ share_message }}</pre>
+
+            <div class="copy-guide">
+                위 문구를 복사해서 카카오톡, 문자, 메신저로 가족에게 보낼 수 있습니다.
+            </div>
+        </section>
+    {% endif %}
+
+    {% if has_generated and short_share_message %}
+        <section class="content-card">
+            <h2>짧은 공유 문구</h2>
+            <pre class="answer-text">{{ short_share_message }}</pre>
+        </section>
+    {% endif %}
+
+    {% if has_generated and not share_message and not error_message %}
+        <section class="content-card">
+            <p>
+                생성된 공유 문구가 없습니다. 현재 상태와 지역명을 다시 확인해주세요.
+            </p>
+        </section>
+    {% endif %}
+
+</main>
+
+<footer>
+    SafeNavi Capstone Design Project
+</footer>
+
+</body>
+</html>

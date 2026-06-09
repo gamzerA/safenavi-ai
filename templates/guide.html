@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>행동요령 AI | SafeNavi</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+
+<header class="top-header">
+    <div class="logo">SafeNavi</div>
+    <nav>
+        <a href="/">홈</a>
+        <a href="/safety">안전지수</a>
+        <a href="/shelters">대피소 추천</a>
+        <a href="/guide">행동요령 AI</a>
+        <a href="/share">안심 공유</a>
+    </nav>
+</header>
+
+<main class="container">
+
+    <section class="page-title">
+        <p class="badge">RAG Action Guide</p>
+        <h1>행동요령 RAG AI</h1>
+        <p>자연재난 국민행동요령 데이터를 검색하여 질문에 맞는 행동요령을 안내합니다.</p>
+    </section>
+
+    <section class="content-card">
+        <h2>질문 입력</h2>
+
+        <form method="post" class="question-form">
+            <textarea name="question" placeholder="예: 호우 때 지하차도 지나가도 돼?">{{ question }}</textarea>
+            <button type="submit" class="btn primary">행동요령 검색</button>
+        </form>
+
+        <div class="example-box">
+            <p>예시 질문</p>
+            <span>호우 때 지하차도 지나가도 돼?</span>
+            <span>태풍 때 창문 근처에 있어도 되나요?</span>
+            <span>폭염일 때 밖에서 운동해도 되나요?</span>
+        </div>
+    </section>
+
+    {% if error_message %}
+        <div class="alert-box">{{ error_message }}</div>
+    {% endif %}
+
+    {% if rag_result %}
+        <section class="content-card answer-card">
+            <h2>AI 답변</h2>
+
+            <div class="analysis-row">
+                <span>분석된 재난 유형</span>
+                <strong>{{ rag_result.detected_disaster_type }}</strong>
+            </div>
+
+            <div class="analysis-row">
+                <span>상황 유형</span>
+                <strong>{{ rag_result.situation_type }}</strong>
+            </div>
+
+            <pre class="answer-text">{{ rag_result.answer }}</pre>
+        </section>
+
+        <section class="content-card">
+            <h2>참고한 행동요령</h2>
+
+            {% if rag_result.references %}
+                <ul class="reference-list">
+                    {% for ref in rag_result.references %}
+                        <li>
+                            <strong>[{{ ref.disaster_type }}]</strong>
+                            {{ ref.title }}
+                            <span>점수: {{ ref.rag_score }}</span>
+                        </li>
+                    {% endfor %}
+                </ul>
+            {% else %}
+                <p>참고한 행동요령이 없습니다.</p>
+            {% endif %}
+        </section>
+    {% endif %}
+
+</main>
+
+<footer>
+    SafeNavi Capstone Design Project
+</footer>
+
+</body>
+</html>

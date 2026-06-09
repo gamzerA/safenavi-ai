@@ -1,0 +1,575 @@
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    font-family: "Pretendard", "Noto Sans KR", Arial, sans-serif;
+    background: #f5f7fb;
+    color: #1f2937;
+}
+
+a {
+    text-decoration: none;
+    color: inherit;
+}
+
+.top-header {
+    height: 72px;
+    background: #ffffff;
+    border-bottom: 1px solid #e5e7eb;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 48px;
+    position: sticky;
+    top: 0;
+    z-index: 10;
+}
+
+.logo {
+    font-size: 24px;
+    font-weight: 800;
+    color: #2563eb;
+}
+
+nav {
+    display: flex;
+    gap: 24px;
+}
+
+nav a {
+    font-size: 15px;
+    color: #4b5563;
+    font-weight: 600;
+}
+
+nav a:hover {
+    color: #2563eb;
+}
+
+.container {
+    width: min(1120px, 92%);
+    margin: 0 auto;
+    padding: 48px 0;
+}
+
+.hero {
+    display: grid;
+    grid-template-columns: 1.6fr 1fr;
+    gap: 32px;
+    align-items: center;
+    margin-bottom: 48px;
+}
+
+.badge {
+    display: inline-block;
+    background: #dbeafe;
+    color: #1d4ed8;
+    padding: 8px 14px;
+    border-radius: 999px;
+    font-size: 14px;
+    font-weight: 700;
+    margin-bottom: 14px;
+}
+
+.hero h1,
+.page-title h1 {
+    font-size: 42px;
+    line-height: 1.25;
+    margin: 0 0 18px;
+    color: #111827;
+}
+
+.hero-desc,
+.page-title p {
+    font-size: 17px;
+    line-height: 1.7;
+    color: #6b7280;
+}
+
+.hero-buttons {
+    margin-top: 28px;
+    display: flex;
+    gap: 12px;
+}
+
+.btn {
+    border: none;
+    border-radius: 12px;
+    padding: 13px 20px;
+    font-size: 15px;
+    font-weight: 700;
+    cursor: pointer;
+    display: inline-block;
+}
+
+.btn.primary {
+    background: #2563eb;
+    color: white;
+}
+
+.btn.secondary {
+    background: #e5e7eb;
+    color: #111827;
+}
+
+.btn:hover {
+    opacity: 0.9;
+}
+
+.hero-card,
+.content-card,
+.feature-card,
+.result-card,
+.score-card {
+    background: white;
+    border-radius: 22px;
+    padding: 28px;
+    border: 1px solid #e5e7eb;
+    box-shadow: 0 10px 24px rgba(15, 23, 42, 0.05);
+}
+
+.hero-card h3 {
+    margin-top: 0;
+    color: #111827;
+}
+
+.small-text,
+.sub-text {
+    color: #6b7280;
+    font-size: 14px;
+    line-height: 1.6;
+}
+
+.feature-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 18px;
+}
+
+.feature-card h3 {
+    margin-top: 0;
+    color: #111827;
+}
+
+.feature-card p {
+    color: #6b7280;
+    line-height: 1.6;
+    min-height: 76px;
+}
+
+.feature-card a {
+    color: #2563eb;
+    font-weight: 700;
+}
+
+.page-title {
+    margin-bottom: 28px;
+}
+
+.score-section {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 18px;
+    margin-bottom: 18px;
+}
+
+.score-card p {
+    color: #6b7280;
+    font-weight: 700;
+    margin: 0 0 12px;
+}
+
+.score-card h2 {
+    font-size: 52px;
+    margin: 0;
+    color: #2563eb;
+}
+
+.score-card.danger h2 {
+    color: #dc2626;
+}
+
+.level {
+    display: inline-block;
+    margin-top: 12px;
+    background: #eff6ff;
+    color: #1d4ed8;
+    padding: 7px 12px;
+    border-radius: 999px;
+    font-weight: 800;
+}
+
+.content-card {
+    margin-bottom: 18px;
+}
+
+.content-card h2 {
+    margin-top: 0;
+    font-size: 22px;
+}
+
+.bar-item {
+    margin: 18px 0;
+}
+
+.bar-label {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 8px;
+}
+
+.bar {
+    width: 100%;
+    height: 12px;
+    background: #e5e7eb;
+    border-radius: 999px;
+    overflow: hidden;
+}
+
+.bar div {
+    height: 100%;
+    background: #2563eb;
+}
+
+.two-column {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 18px;
+}
+
+.tag-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+.tag {
+    background: #fef3c7;
+    color: #92400e;
+    padding: 8px 12px;
+    border-radius: 999px;
+    font-weight: 700;
+}
+
+.info-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+
+.info-list li {
+    padding: 8px 0;
+    border-bottom: 1px solid #f3f4f6;
+}
+
+.action-list li {
+    margin-bottom: 10px;
+    line-height: 1.6;
+}
+
+.form-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 14px;
+    align-items: end;
+}
+
+label {
+    display: block;
+    margin-bottom: 8px;
+    font-weight: 700;
+    color: #374151;
+}
+
+input,
+select,
+textarea {
+    width: 100%;
+    border: 1px solid #d1d5db;
+    border-radius: 12px;
+    padding: 13px 14px;
+    font-size: 15px;
+    outline: none;
+    background: white;
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+    border-color: #2563eb;
+}
+
+.form-button {
+    display: flex;
+    align-items: end;
+}
+
+.alert-box {
+    background: #fee2e2;
+    color: #991b1b;
+    padding: 16px 18px;
+    border-radius: 14px;
+    margin-bottom: 18px;
+    font-weight: 700;
+}
+
+.result-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 18px;
+}
+
+.result-card {
+    position: relative;
+}
+
+.rank {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    background: #2563eb;
+    color: white;
+    font-weight: 800;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-bottom: 14px;
+}
+
+.result-card h2 {
+    margin: 0 0 8px;
+    font-size: 22px;
+}
+
+.score-detail {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 14px 0;
+}
+
+.score-detail span {
+    background: #f3f4f6;
+    padding: 7px 10px;
+    border-radius: 999px;
+    font-size: 13px;
+    font-weight: 700;
+}
+
+.reason {
+    color: #4b5563;
+    line-height: 1.6;
+}
+
+.question-form textarea {
+    min-height: 120px;
+    resize: vertical;
+    margin-bottom: 12px;
+}
+
+.example-box {
+    margin-top: 20px;
+    background: #f9fafb;
+    border-radius: 16px;
+    padding: 18px;
+}
+
+.example-box p {
+    margin-top: 0;
+    font-weight: 800;
+}
+
+.example-box span {
+    display: inline-block;
+    background: #ffffff;
+    border: 1px solid #e5e7eb;
+    padding: 8px 12px;
+    border-radius: 999px;
+    margin: 4px;
+    font-size: 14px;
+}
+
+.answer-card {
+    border-left: 6px solid #2563eb;
+}
+
+.analysis-row {
+    display: flex;
+    justify-content: space-between;
+    border-bottom: 1px solid #f3f4f6;
+    padding: 10px 0;
+}
+
+.analysis-row strong {
+    color: #2563eb;
+}
+
+.answer-text {
+    white-space: pre-wrap;
+    background: #f9fafb;
+    border-radius: 16px;
+    padding: 18px;
+    line-height: 1.7;
+    font-family: inherit;
+    color: #111827;
+}
+
+.reference-list {
+    list-style: none;
+    padding: 0;
+}
+
+.reference-list li {
+    padding: 12px 0;
+    border-bottom: 1px solid #f3f4f6;
+}
+
+.reference-list span {
+    float: right;
+    color: #6b7280;
+    font-size: 14px;
+}
+
+.copy-guide {
+    margin-top: 14px;
+    background: #eff6ff;
+    color: #1d4ed8;
+    padding: 12px 14px;
+    border-radius: 12px;
+    font-size: 14px;
+    font-weight: 700;
+}
+
+/* 대피소 지도 */
+#shelterMap {
+    width: 100%;
+    height: 420px;
+    border-radius: 18px;
+    border: 1px solid #e5e7eb;
+    overflow: hidden;
+    margin-top: 16px;
+}
+
+.location-guide {
+    background: #f9fafb;
+    border-radius: 16px;
+    padding: 14px 16px;
+    margin-bottom: 18px;
+    color: #4b5563;
+    line-height: 1.6;
+}
+
+.button-row {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.user-location-marker {
+    font-size: 30px;
+    text-align: center;
+    line-height: 34px;
+}
+
+.shelter-rank-marker {
+    background: #2563eb;
+    color: white;
+    border: 3px solid white;
+    border-radius: 50%;
+    text-align: center;
+    font-size: 15px;
+    font-weight: 800;
+    line-height: 27px;
+    box-shadow: 0 4px 10px rgba(15, 23, 42, 0.3);
+}
+
+/* 경로 안내 버튼 */
+.route-buttons {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-top: 16px;
+}
+
+.route-btn {
+    font-size: 13px;
+    padding: 9px 12px;
+}
+
+.leaflet-popup-content a {
+    color: #2563eb;
+    font-weight: 700;
+    line-height: 1.8;
+}
+
+/* 푸터 */
+footer {
+    text-align: center;
+    color: #9ca3af;
+    padding: 32px 0;
+    font-size: 14px;
+}
+
+@media (max-width: 900px) {
+    .top-header {
+        padding: 0 20px;
+        flex-direction: column;
+        height: auto;
+        gap: 12px;
+        padding-top: 18px;
+        padding-bottom: 18px;
+    }
+
+    nav {
+        flex-wrap: wrap;
+        justify-content: center;
+        gap: 14px;
+    }
+
+    .hero,
+    .score-section,
+    .two-column,
+    .result-grid,
+    .feature-grid,
+    .form-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .hero h1,
+    .page-title h1 {
+        font-size: 32px;
+    }
+
+    #shelterMap {
+        height: 360px;
+    }
+
+    .button-row {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    .button-row .btn {
+        width: 100%;
+        text-align: center;
+    }
+
+    .route-buttons {
+        flex-direction: column;
+    }
+
+    .route-btn {
+        width: 100%;
+        text-align: center;
+    }
+}
+.route-notice {
+    margin-top: 10px;
+    font-size: 12px;
+}
+
+.leaflet-popup-content span {
+    line-height: 1.5;
+}
