@@ -6,6 +6,7 @@ from modules.safety_score import calculate_today_safety_score
 from modules.shelter_recommender import recommend_shelters
 from modules.action_guide_rag import generate_rag_answer
 from modules.share_message import generate_share_message
+from modules.update_disaster_alerts import update_disaster_alerts
 
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -24,13 +25,12 @@ SHARE_MESSAGE_PATH = os.path.join(
 app = Flask(__name__)
 
 
-
 # 공통 함수
-
 
 def safe_read_csv(path):
     """
-    CSV 파일을 안전하게 읽는 함수
+    CSV 파일을 읽는 함수.
+    파일이 없거나 비어 있으면 빈 DataFrame을 반환한다.
     """
     if not os.path.exists(path):
         return pd.DataFrame()
@@ -46,7 +46,7 @@ def safe_read_csv(path):
 
 def dataframe_to_dict_list(df):
     """
-    DataFrame을 HTML에서 쓰기 쉬운 dict list로 변환
+    DataFrame을 HTML에서 사용하기 쉬운 dict list로 변환한다.
     """
     if df is None or df.empty:
         return []
@@ -57,8 +57,8 @@ def dataframe_to_dict_list(df):
 
 def get_default_user_location():
     """
-    테스트용 사용자 위치.
-    실제 서비스에서는 브라우저 GPS 또는 지도 클릭 좌표로 대체 가능.
+    테스트용 기본 사용자 위치.
+    실제 서비스에서는 브라우저 GPS 좌표가 POST 요청으로 들어온다.
     """
     return {
         "lat": 37.2410,
@@ -68,11 +68,234 @@ def get_default_user_location():
 
 
 
-# 메인
+# RAG 결과 화면 표시용 정규화 함수
+
+def infer_disaster_type_from_text(text):
+    """
+    질문 또는 답변 문장에서 재난 유형을 추정한다.
+    RAG 결과에 disaster_type 값이 없을 때 화면 표시용으로 사용한다.
+    """
+    text = str(text)
+
+    keyword_map = {
+        "호우/침수": ["호우", "침수", "폭우", "지하차도", "하천", "홍수"],
+        "태풍": ["태풍", "강풍", "바람"],
+        "폭염": ["폭염", "더위", "무더위", "온열"],
+        "한파": ["한파", "추위", "동파"],
+        "대설": ["대설", "폭설", "눈", "결빙"],
+        "지진": ["지진", "흔들림"],
+        "지진해일": ["지진해일", "해일", "쓰나미"],
+        "산사태": ["산사태", "토사", "비탈", "급경사지"],
+        "낙뢰": ["낙뢰", "번개", "천둥"],
+        "황사": ["황사", "미세먼지"]
+    }
+
+    for disaster_type, keywords in keyword_map.items():
+        for keyword in keywords:
+            if keyword in text:
+                return disaster_type
+
+    return "분석 정보 없음"
+
+
+def get_first_value(data, keys, default=""):
+    """
+    dict에서 여러 후보 키 중 첫 번째로 존재하는 값을 가져온다.
+    값이 None이거나 빈 문자열이면 다음 후보 키를 확인한다.
+    """
+    if not isinstance(data, dict):
+        return default
+
+    for key in keys:
+        value = data.get(key)
+
+        if value is not None and str(value).strip() != "":
+            return value
+
+    return default
+
+
+def normalize_reference_item(item):
+    """
+    RAG 참고 문헌 1개를 화면에서 쓰기 쉬운 구조로 변환한다.
+    """
+
+    if not isinstance(item, dict):
+        return {
+            "disaster_type": infer_disaster_type_from_text(str(item)),
+            "title": str(item),
+            "score": "점수 정보 없음"
+        }
+
+    ref_disaster_type = get_first_value(
+        item,
+        [
+            "disaster_type",
+            "detected_disaster_type",
+            "query_disaster_type",
+            "main_disaster_type",
+            "disaster_category",
+            "category",
+            "type",
+            "재난유형"
+        ],
+        default=""
+    )
+
+    ref_title = get_first_value(
+        item,
+        [
+            "title",
+            "guide_title",
+            "manual_title",
+            "name",
+            "action_title",
+            "content_title",
+            "행동요령명",
+            "제목"
+        ],
+        default="행동요령 제목 없음"
+    )
+
+    ref_score = get_first_value(
+        item,
+        [
+            "score",
+            "final_score",
+            "similarity_score",
+            "total_score",
+            "match_score",
+            "rag_score",
+            "search_score",
+            "keyword_score",
+            "점수"
+        ],
+        default=""
+    )
+
+    if ref_disaster_type == "":
+        ref_disaster_type = infer_disaster_type_from_text(ref_title)
+
+    if ref_score == "":
+        ref_score = "점수 정보 없음"
+
+    return {
+        "disaster_type": ref_disaster_type,
+        "title": ref_title,
+        "score": ref_score
+    }
+
+
+def normalize_rag_result(rag_result, question=""):
+    """
+    action_guide_rag.py에서 반환한 결과를 guide.html에서 쓰기 쉬운 구조로 정리한다.
+
+    최종 화면용 구조:
+    {
+        "disaster_type": "...",
+        "situation_type": "...",
+        "answer": "...",
+        "references": [
+            {
+                "disaster_type": "...",
+                "title": "...",
+                "score": "..."
+            }
+        ]
+    }
+    """
+
+    if rag_result is None:
+        return None
+
+    # 혹시 문자열로 바로 답변이 온 경우
+    if not isinstance(rag_result, dict):
+        answer_text = str(rag_result)
+
+        return {
+            "disaster_type": infer_disaster_type_from_text(question + " " + answer_text),
+            "situation_type": "일반 상황",
+            "answer": answer_text,
+            "references": []
+        }
+
+    answer = get_first_value(
+        rag_result,
+        ["answer", "response", "result", "message", "content"],
+        default=""
+    )
+
+    situation_type = get_first_value(
+        rag_result,
+        ["situation_type", "situation", "stage", "context_type"],
+        default="일반 상황"
+    )
+
+    disaster_type = get_first_value(
+        rag_result,
+        [
+            "disaster_type",
+            "detected_disaster_type",
+            "query_disaster_type",
+            "main_disaster_type",
+            "disaster_category",
+            "category",
+            "type"
+        ],
+        default=""
+    )
+
+    references = get_first_value(
+        rag_result,
+        [
+            "references",
+            "reference_list",
+            "top_guides",
+            "results",
+            "search_results",
+            "matched_guides",
+            "retrieved_guides"
+        ],
+        default=[]
+    )
+
+    if references is None:
+        references = []
+
+    normalized_references = []
+
+    if isinstance(references, list):
+        for item in references:
+            normalized_references.append(
+                normalize_reference_item(item)
+            )
+
+    # disaster_type이 비어 있으면 참고 문헌 또는 질문/답변에서 추정
+    if disaster_type == "":
+        if normalized_references:
+            disaster_type = normalized_references[0].get("disaster_type", "")
+
+        if disaster_type == "" or disaster_type == "재난유형 미분류":
+            disaster_type = infer_disaster_type_from_text(question + " " + answer)
+
+    if answer == "":
+        answer = "답변을 생성하지 못했습니다."
+
+    return {
+        "disaster_type": disaster_type,
+        "situation_type": situation_type,
+        "answer": answer,
+        "references": normalized_references
+    }
+
+
+
+# 메인 화면
+
 @app.route("/")
 def index():
     """
-    SafeNavi 메인 페이지
+    SafeNavi 메인 페이지.
     """
     user_location = get_default_user_location()
 
@@ -85,11 +308,10 @@ def index():
 
 # 오늘의 안전지수 화면
 
-
 @app.route("/safety")
 def safety():
     """
-    오늘의 안전지수 결과 화면
+    오늘의 안전지수 결과 화면.
     """
 
     try:
@@ -140,15 +362,16 @@ def safety():
 
 # 맞춤형 대피소 추천 화면
 
-
 @app.route("/shelters", methods=["GET", "POST"])
 def shelters():
     """
     사용자 위치 기반 대피소 추천 화면.
 
-    속도 개선:
-    - GET 요청에서는 대피소 추천 계산을 하지 않는다.
-    - POST 요청, 즉 버튼을 눌렀을 때만 recommend_shelters()를 실행한다.
+    GET:
+    - 처음 접속 시 추천 계산을 하지 않고 입력 화면만 보여준다.
+
+    POST:
+    - 사용자가 추천 버튼을 눌렀을 때만 대피소 추천을 계산한다.
     """
 
     user_location = get_default_user_location()
@@ -162,7 +385,6 @@ def shelters():
     error_message = None
     has_searched = False
 
-    # 처음 페이지 접속 시에는 계산하지 않고 입력 화면만 보여줌
     if request.method == "GET":
         return render_template(
             "shelters.html",
@@ -175,7 +397,6 @@ def shelters():
             has_searched=has_searched
         )
 
-    # 버튼을 눌렀을 때만 여기부터 실행
     has_searched = True
 
     try:
@@ -234,11 +455,10 @@ def shelters():
 
 # 행동요령 RAG 검색 화면
 
-
 @app.route("/guide", methods=["GET", "POST"])
 def guide():
     """
-    사용자가 질문을 입력하면 행동요령 RAG 답변 생성
+    사용자가 질문을 입력하면 자연재난 국민행동요령 기반 RAG 답변을 생성한다.
     """
 
     question = ""
@@ -254,9 +474,14 @@ def guide():
             error_message = "질문을 입력해주세요."
         else:
             try:
-                rag_result = generate_rag_answer(
+                raw_rag_result = generate_rag_answer(
                     question=question,
                     top_n=3
+                )
+
+                rag_result = normalize_rag_result(
+                    rag_result=raw_rag_result,
+                    question=question
                 )
 
             except Exception as e:
@@ -275,15 +500,16 @@ def guide():
 
 # 가족 안심 공유 문구 화면
 
-
 @app.route("/share", methods=["GET", "POST"])
 def share():
     """
-    가족에게 보낼 안심 공유 문구 생성.
+    가족에게 보낼 안심 공유 문구 생성 화면.
 
-    속도 개선:
-    - GET 요청에서는 공유 문구를 자동 생성하지 않는다.
-    - POST 요청에서만 generate_share_message() 실행.
+    GET:
+    - 처음 접속 시 자동 생성하지 않는다.
+
+    POST:
+    - 사용자가 생성 버튼을 눌렀을 때만 공유 문구를 생성한다.
     """
 
     user_location = get_default_user_location()
@@ -297,7 +523,6 @@ def share():
     error_message = None
     has_generated = False
 
-    # 처음 페이지 접속 시에는 생성하지 않고 입력 화면만 출력함
     if request.method == "GET":
         return render_template(
             "share.html",
@@ -310,7 +535,6 @@ def share():
             has_generated=has_generated
         )
 
-    # 버튼을 눌렀을 때만 문구 생성
     has_generated = True
 
     user_status = request.form.get("user_status", "안전").strip()
@@ -357,7 +581,6 @@ def share():
 
 # CSV 결과 확인용 화면
 
-
 @app.route("/data/shelters")
 def data_shelters():
     """
@@ -381,6 +604,56 @@ def data_shelters():
         has_searched=True
     )
 
+
+
+# 긴급재난문자 자동 업데이트 경로
+
+@app.route("/update-alerts")
+def update_alerts():
+    """
+    긴급재난문자 자동 업데이트용 관리자 경로.
+
+    사용 예:
+    /update-alerts?key=설정한비밀키
+
+    외부 스케줄러가 이 주소를 5분마다 호출하면
+    최신 긴급재난문자를 수집하고 AI 분석 CSV를 갱신할 수 있다.
+    """
+
+    secret_key = os.environ.get("UPDATE_SECRET_KEY")
+    request_key = request.args.get("key")
+
+    if not secret_key:
+        return {
+            "status": "error",
+            "message": "UPDATE_SECRET_KEY가 설정되어 있지 않습니다."
+        }, 500
+
+    if request_key != secret_key:
+        return {
+            "status": "error",
+            "message": "잘못된 접근입니다."
+        }, 403
+
+    try:
+        result = update_disaster_alerts(
+            days=7,
+            region_name=None
+        )
+
+        return {
+            "status": "success",
+            "message": "긴급재난문자 업데이트가 완료되었습니다.",
+            "result": result
+        }
+
+    except Exception as e:
+        print(f"[긴급재난문자 업데이트 오류] {e}")
+
+        return {
+            "status": "error",
+            "message": str(e)
+        }, 500
 
 
 # 상태 확인용 경로

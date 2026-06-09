@@ -21,89 +21,147 @@
 <main class="container">
 
     <section class="page-title">
-        <p class="badge">Safety Index</p>
+        <p class="badge">Today Safety Index</p>
         <h1>오늘의 안전지수</h1>
-        <p>긴급재난문자, 기상특보, 생활기상지수를 종합해 현재 위험도를 계산합니다.</p>
+        <p>
+            긴급재난문자, 기상특보, 생활기상지수 데이터를 종합하여
+            현재 상황의 위험도를 계산합니다.
+        </p>
     </section>
 
-    <section class="score-section">
-        <div class="score-card">
-            <p>오늘의 안전 점수</p>
-            <h2>{{ safety_result.safety_score }}점</h2>
-            <span class="level">{{ safety_result.safety_level }}</span>
+    <section class="safety-hero-card">
+        <div class="safety-score-main">
+            <p class="safety-label">현재 안전 수준</p>
+
+            <div class="safety-score-number">
+                {{ safety_result.safety_score }}
+                <span>점</span>
+            </div>
+
+            <div class="safety-level-badge">
+                {{ safety_result.safety_level }}
+            </div>
+
+            <p class="safety-summary">
+                위험 점수는 {{ safety_result.risk_score }}점입니다.
+                점수가 높을수록 안전한 상태에 가깝습니다.
+            </p>
         </div>
 
-        <div class="score-card danger">
-            <p>위험 점수</p>
-            <h2>{{ safety_result.risk_score }}점</h2>
-            <span>위험도가 높을수록 주의가 필요합니다.</span>
+        <div class="safety-score-side">
+            <div class="risk-meter">
+                <div class="risk-meter-top">
+                    <span>위험도</span>
+                    <strong>{{ safety_result.risk_score }}점</strong>
+                </div>
+
+                <div class="risk-bar">
+                    <div
+                        class="risk-bar-fill"
+                        style="width: {{ safety_result.risk_score }}%;"
+                    ></div>
+                </div>
+
+                <p>
+                    위험도는 재난문자, 기상특보, 생활기상지수의 위험 점수를 합산하여 계산합니다.
+                </p>
+            </div>
         </div>
     </section>
 
-    <section class="content-card">
-        <h2>점수 구성</h2>
-
-        <div class="bar-item">
-            <div class="bar-label">
-                <span>긴급재난문자 위험 점수</span>
-                <strong>{{ safety_result.alert_risk_score }}점</strong>
-            </div>
-            <div class="bar"><div style="width: {{ safety_result.alert_risk_score }}%;"></div></div>
+    <section class="safety-stat-grid">
+        <div class="safety-stat-card">
+            <span>재난문자 위험</span>
+            <strong>{{ safety_result.alert_risk_score }}점</strong>
+            <p>자연재난 문자와 위험도 분석 결과</p>
         </div>
 
-        <div class="bar-item">
-            <div class="bar-label">
-                <span>기상특보 위험 점수</span>
-                <strong>{{ safety_result.weather_warning_risk_score }}점</strong>
-            </div>
-            <div class="bar"><div style="width: {{ safety_result.weather_warning_risk_score }}%;"></div></div>
+        <div class="safety-stat-card">
+            <span>기상특보 위험</span>
+            <strong>{{ safety_result.weather_warning_risk_score }}점</strong>
+            <p>호우, 태풍, 대설 등 기상특보 반영</p>
         </div>
 
-        <div class="bar-item">
-            <div class="bar-label">
-                <span>생활기상지수 위험 점수</span>
-                <strong>{{ safety_result.living_weather_risk_score }}점</strong>
-            </div>
-            <div class="bar"><div style="width: {{ safety_result.living_weather_risk_score }}%;"></div></div>
+        <div class="safety-stat-card">
+            <span>생활기상 위험</span>
+            <strong>{{ safety_result.living_weather_risk_score }}점</strong>
+            <p>폭염, 한파 등 생활기상지수 반영</p>
         </div>
     </section>
 
-    <section class="two-column">
+    <section class="safety-detail-grid">
         <div class="content-card">
-            <h2>주요 위험 유형</h2>
+            <div class="section-heading-row">
+                <div>
+                    <p class="section-kicker">Detected Risks</p>
+                    <h2>주요 위험 유형</h2>
+                </div>
+            </div>
+
             {% if safety_result.main_risk_types %}
-                <div class="tag-list">
-                    {% for item in safety_result.main_risk_types %}
-                        <span class="tag">{{ item }}</span>
+                <div class="risk-chip-list">
+                    {% for risk in safety_result.main_risk_types %}
+                        <span class="risk-chip">{{ risk }}</span>
                     {% endfor %}
                 </div>
             {% else %}
-                <p>현재 확인된 주요 위험 유형이 없습니다.</p>
+                <p class="empty-text">
+                    현재 주요 위험 유형이 확인되지 않았습니다.
+                </p>
             {% endif %}
         </div>
 
         <div class="content-card">
-            <h2>상세 정보</h2>
-            <ul class="info-list">
-                <li>자연재난 문자 수: <strong>{{ safety_result.natural_alert_count }}건</strong></li>
-                <li>고위험 자연재난 문자 수: <strong>{{ safety_result.high_risk_alert_count }}건</strong></li>
-                <li>기상특보 수: <strong>{{ safety_result.weather_warning_count }}건</strong></li>
-                <li>생활기상지수 수: <strong>{{ safety_result.living_weather_count }}건</strong></li>
-            </ul>
+            <div class="section-heading-row">
+                <div>
+                    <p class="section-kicker">Recommended Actions</p>
+                    <h2>권장 행동</h2>
+                </div>
+            </div>
+
+            {% if safety_result.recommended_actions %}
+                <ul class="safety-action-list">
+                    {% for action in safety_result.recommended_actions %}
+                        <li>{{ action }}</li>
+                    {% endfor %}
+                </ul>
+            {% else %}
+                <p class="empty-text">
+                    현재 추가 권장 행동은 없습니다. 주변 재난문자와 기상정보를 계속 확인해주세요.
+                </p>
+            {% endif %}
         </div>
     </section>
 
-    <section class="content-card">
-        <h2>권장 행동</h2>
-        {% if safety_result.recommended_actions %}
-            <ol class="action-list">
-                {% for action in safety_result.recommended_actions %}
-                    <li>{{ action }}</li>
-                {% endfor %}
-            </ol>
-        {% else %}
-            <p>현재 권장 행동 정보가 없습니다.</p>
-        {% endif %}
+    <section class="content-card safety-data-card">
+        <div class="section-heading-row">
+            <div>
+                <p class="section-kicker">Data Summary</p>
+                <h2>분석 데이터 요약</h2>
+            </div>
+        </div>
+
+        <div class="data-summary-grid">
+            <div>
+                <span>자연재난 문자</span>
+                <strong>{{ safety_result.natural_alert_count }}건</strong>
+            </div>
+
+            <div>
+                <span>고위험 문자</span>
+                <strong>{{ safety_result.high_risk_alert_count }}건</strong>
+            </div>
+
+            <div>
+                <span>기상특보</span>
+                <strong>{{ safety_result.weather_warning_count }}건</strong>
+            </div>
+
+            <div>
+                <span>생활기상지수</span>
+                <strong>{{ safety_result.living_weather_count }}건</strong>
+            </div>
+        </div>
     </section>
 
 </main>

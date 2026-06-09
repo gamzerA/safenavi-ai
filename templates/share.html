@@ -21,52 +21,51 @@
 <main class="container">
 
     <section class="page-title">
-        <p class="badge">Safety Share Message</p>
+        <p class="badge">Family Safety Share</p>
         <h1>가족 안심 공유 문구</h1>
         <p>
-            현재 지역의 재난문자와 추천 대피소 정보를 바탕으로
-            가족에게 보낼 안심 공유 문구를 자동 생성합니다.
+            현재 위치 주변 재난 상황과 대피소 정보를 바탕으로
+            가족에게 보낼 수 있는 안심 공유 문구를 자동 생성합니다.
         </p>
     </section>
 
-    <section class="content-card">
+    <section class="content-card share-input-card">
         <h2>공유 정보 입력</h2>
 
-        <form method="post" class="form-grid">
+        <form method="post" class="form-grid share-form">
             <div>
                 <label>현재 상태</label>
-                <input 
-                    type="text" 
-                    name="user_status" 
-                    value="{{ user_status }}" 
-                    placeholder="예: 안전, 이동 중, 대피소 확인 완료"
-                >
+                <select name="user_status">
+                    <option value="안전" {% if user_status == "안전" %}selected{% endif %}>안전</option>
+                    <option value="이동 중" {% if user_status == "이동 중" %}selected{% endif %}>이동 중</option>
+                    <option value="대피 중" {% if user_status == "대피 중" %}selected{% endif %}>대피 중</option>
+                    <option value="도움 필요" {% if user_status == "도움 필요" %}selected{% endif %}>도움 필요</option>
+                </select>
             </div>
 
             <div>
-                <label>현재 지역</label>
-                <input 
-                    type="text" 
-                    name="user_region" 
-                    value="{{ user_region }}" 
+                <label>지역</label>
+                <input
+                    type="text"
+                    name="user_region"
+                    value="{{ user_region }}"
                     placeholder="예: 경기도 용인시"
                 >
             </div>
 
             <div>
-                <label>문구 형태</label>
+                <label>문구 스타일</label>
                 <select name="tone">
-                    <option value="normal" {% if tone == "normal" %}selected{% endif %}>
-                        자세한 문구
-                    </option>
-                    <option value="short" {% if tone == "short" %}selected{% endif %}>
-                        짧은 문구
-                    </option>
+                    <option value="normal" {% if tone == "normal" %}selected{% endif %}>기본형</option>
+                    <option value="short" {% if tone == "short" %}selected{% endif %}>짧은 문구</option>
+                    <option value="calm" {% if tone == "calm" %}selected{% endif %}>차분한 문구</option>
                 </select>
             </div>
 
             <div class="form-button">
-                <button type="submit" class="btn primary">공유 문구 생성</button>
+                <button type="submit" class="btn primary">
+                    공유 문구 생성
+                </button>
             </div>
         </form>
     </section>
@@ -77,42 +76,72 @@
         </div>
     {% endif %}
 
-    {% if not has_generated %}
-        <section class="content-card">
-            <h2>사용 방법</h2>
-            <p>
-                현재 상태와 지역을 확인한 뒤 <strong>공유 문구 생성</strong> 버튼을 눌러주세요.
-            </p>
-            <ul class="info-list">
-                <li>현재 상태 예시: <strong>안전</strong>, <strong>이동 중</strong>, <strong>대피소 확인 완료</strong></li>
-                <li>현재 지역 예시: <strong>경기도 용인시</strong>, <strong>서울특별시 강남구</strong></li>
-                <li>지역 기준으로 관련 재난문자를 확인한 뒤, 가까운 대피소 정보를 함께 표시합니다.</li>
-            </ul>
-        </section>
-    {% endif %}
-
     {% if has_generated and share_message %}
-        <section class="content-card answer-card">
-            <h2>생성된 공유 문구</h2>
-            <pre class="answer-text">{{ share_message }}</pre>
+        <section class="content-card generated-share-card">
+            <div class="share-result-header">
+                <div>
+                    <p class="share-result-label">Generated Message</p>
+                    <h2>생성된 공유 문구</h2>
+                    <p>
+                        아래 문구를 복사하거나, 모바일에서 바로 가족에게 공유할 수 있습니다.
+                    </p>
+                </div>
 
-            <div class="copy-guide">
-                위 문구를 복사해서 카카오톡, 문자, 메신저로 가족에게 보낼 수 있습니다.
+                <div class="share-status-badge">
+                    {{ user_status }}
+                </div>
             </div>
+
+            <div class="share-message-preview" id="shareMessageText">{{ share_message }}</div>
+
+            <div class="share-button-row">
+                <button type="button" class="btn primary" onclick="copyShareMessage()">
+                    문구 복사하기
+                </button>
+
+                <button type="button" class="btn secondary" onclick="nativeShareMessage()">
+                    바로 공유하기
+                </button>
+            </div>
+
+            <p id="shareStatus" class="small-text share-status-text"></p>
         </section>
     {% endif %}
 
     {% if has_generated and short_share_message %}
-        <section class="content-card">
-            <h2>짧은 공유 문구</h2>
-            <pre class="answer-text">{{ short_share_message }}</pre>
+        <section class="content-card short-share-card">
+            <div class="share-result-header compact">
+                <div>
+                    <p class="share-result-label">Short Version</p>
+                    <h2>짧은 공유 문구</h2>
+                    <p>
+                        문자나 카카오톡에 간단히 보낼 때 사용할 수 있는 짧은 버전입니다.
+                    </p>
+                </div>
+            </div>
+
+            <div class="share-message-preview short-preview" id="shortShareMessageText">{{ short_share_message }}</div>
+
+            <div class="share-button-row">
+                <button type="button" class="btn secondary" onclick="copyShortShareMessage()">
+                    짧은 문구 복사
+                </button>
+
+                <button type="button" class="btn secondary" onclick="nativeShareShortMessage()">
+                    짧은 문구 공유
+                </button>
+            </div>
+
+            <p id="shortShareStatus" class="small-text share-status-text"></p>
         </section>
     {% endif %}
 
-    {% if has_generated and not share_message and not error_message %}
-        <section class="content-card">
+    {% if not has_generated %}
+        <section class="content-card share-empty-card">
+            <h2>안심 공유 문구를 만들어보세요</h2>
             <p>
-                생성된 공유 문구가 없습니다. 현재 상태와 지역명을 다시 확인해주세요.
+                현재 상태와 지역을 입력하면 가족에게 보낼 수 있는 문구가 자동으로 생성됩니다.
+                재난문자와 추천 대피소 정보를 함께 반영할 수 있습니다.
             </p>
         </section>
     {% endif %}
@@ -122,6 +151,82 @@
 <footer>
     SafeNavi Capstone Design Project
 </footer>
+
+<script>
+    function getTextById(id) {
+        const element = document.getElementById(id);
+        if (!element) {
+            return "";
+        }
+        return element.innerText.trim();
+    }
+
+    function copyText(text, statusId) {
+        const status = document.getElementById(statusId);
+
+        if (!text) {
+            if (status) {
+                status.innerText = "복사할 문구가 없습니다.";
+            }
+            return;
+        }
+
+        navigator.clipboard.writeText(text)
+            .then(function() {
+                if (status) {
+                    status.innerText = "문구가 복사되었습니다.";
+                }
+            })
+            .catch(function() {
+                if (status) {
+                    status.innerText = "복사에 실패했습니다. 문구를 직접 선택해서 복사해주세요.";
+                }
+            });
+    }
+
+    function copyShareMessage() {
+        copyText(getTextById("shareMessageText"), "shareStatus");
+    }
+
+    function copyShortShareMessage() {
+        copyText(getTextById("shortShareMessageText"), "shortShareStatus");
+    }
+
+    function nativeShare(text, statusId) {
+        const status = document.getElementById(statusId);
+
+        if (!text) {
+            if (status) {
+                status.innerText = "공유할 문구가 없습니다.";
+            }
+            return;
+        }
+
+        if (navigator.share) {
+            navigator.share({
+                title: "SafeNavi 안심 공유",
+                text: text
+            }).catch(function() {
+                if (status) {
+                    status.innerText = "공유가 취소되었거나 실패했습니다.";
+                }
+            });
+        } else {
+            copyText(text, statusId);
+            if (status) {
+                status.innerText = "이 브라우저에서는 바로 공유를 지원하지 않아 문구를 복사했습니다.";
+            }
+        }
+    }
+
+    function nativeShareMessage() {
+        nativeShare(getTextById("shareMessageText"), "shareStatus");
+    }
+
+    function nativeShareShortMessage() {
+        nativeShare(getTextById("shortShareMessageText"), "shortShareStatus");
+    }
+</script>
 
 </body>
 </html>

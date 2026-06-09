@@ -23,61 +23,161 @@
     <section class="page-title">
         <p class="badge">RAG Action Guide</p>
         <h1>행동요령 RAG AI</h1>
-        <p>자연재난 국민행동요령 데이터를 검색하여 질문에 맞는 행동요령을 안내합니다.</p>
+        <p>
+            자연재난 국민행동요령 데이터를 검색하여 질문에 맞는 행동요령을 안내합니다.
+            재난 상황별로 해야 할 행동과 피해야 할 행동을 쉽게 확인할 수 있습니다.
+        </p>
     </section>
 
-    <section class="content-card">
-        <h2>질문 입력</h2>
+    <section class="content-card guide-input-card">
+        <div class="guide-card-header">
+            <div>
+                <h2>질문 입력</h2>
+                <p class="guide-sub-text">
+                    궁금한 재난 상황을 자연스럽게 입력하면 관련 행동요령을 찾아 답변합니다.
+                </p>
+            </div>
+        </div>
 
-        <form method="post" class="question-form">
-            <textarea name="question" placeholder="예: 호우 때 지하차도 지나가도 돼?">{{ question }}</textarea>
-            <button type="submit" class="btn primary">행동요령 검색</button>
+        <form method="post" class="guide-form">
+            <textarea
+                name="question"
+                placeholder="예: 호우 때 지하차도 지나가도 돼?"
+            >{{ question }}</textarea>
+
+            <div class="guide-action-row">
+                <button type="submit" class="btn primary">
+                    행동요령 검색
+                </button>
+                <p class="small-text">
+                    추천 질문을 누르면 입력창에 자동으로 들어갑니다.
+                </p>
+            </div>
         </form>
 
-        <div class="example-box">
-            <p>예시 질문</p>
-            <span>호우 때 지하차도 지나가도 돼?</span>
-            <span>태풍 때 창문 근처에 있어도 되나요?</span>
-            <span>폭염일 때 밖에서 운동해도 되나요?</span>
+        <div class="example-question-box">
+            <div class="example-title-row">
+                <p class="example-label">추천 질문</p>
+                <span>자주 묻는 재난 상황</span>
+            </div>
+
+            <div class="example-question-grid">
+                <button type="button" class="example-chip" onclick="setExampleQuestion('호우 때 지하차도 지나가도 돼?')">
+                    호우 때 지하차도 지나가도 돼?
+                </button>
+
+                <button type="button" class="example-chip" onclick="setExampleQuestion('태풍 때 창문 근처에 있어도 되나요?')">
+                    태풍 때 창문 근처에 있어도 되나요?
+                </button>
+
+                <button type="button" class="example-chip" onclick="setExampleQuestion('폭염일 때 밖에서 운동해도 되나요?')">
+                    폭염일 때 밖에서 운동해도 되나요?
+                </button>
+
+                <button type="button" class="example-chip" onclick="setExampleQuestion('대설 특보 중에는 어떻게 행동해야 하나요?')">
+                    대설 특보 중에는 어떻게 행동해야 하나요?
+                </button>
+            </div>
         </div>
     </section>
 
     {% if error_message %}
-        <div class="alert-box">{{ error_message }}</div>
+        <div class="alert-box">
+            {{ error_message }}
+        </div>
     {% endif %}
 
-    {% if rag_result %}
-        <section class="content-card answer-card">
-            <h2>AI 답변</h2>
-
-            <div class="analysis-row">
-                <span>분석된 재난 유형</span>
-                <strong>{{ rag_result.detected_disaster_type }}</strong>
+    {% if has_searched and rag_result %}
+        <section class="content-card rag-result-card">
+            <div class="rag-section-title">
+                <span class="rag-icon">AI</span>
+                <div>
+                    <h2>AI 답변</h2>
+                    <p>입력한 질문을 분석하여 가장 관련 있는 행동요령을 정리했습니다.</p>
+                </div>
             </div>
 
-            <div class="analysis-row">
-                <span>상황 유형</span>
-                <strong>{{ rag_result.situation_type }}</strong>
+            <div class="rag-meta-grid">
+                <div class="rag-meta-item">
+                    <span>분석된 재난 유형</span>
+                    <strong>
+                        {{ rag_result.disaster_type
+                           or rag_result.disaster_category
+                           or rag_result.category
+                           or rag_result.type
+                           or "분석 정보 없음" }}
+                    </strong>
+                </div>
+
+                <div class="rag-meta-item">
+                    <span>상황 유형</span>
+                    <strong>
+                        {{ rag_result.situation_type
+                           or rag_result.stage
+                           or "일반 상황" }}
+                    </strong>
+                </div>
             </div>
 
-            <pre class="answer-text">{{ rag_result.answer }}</pre>
+            <div class="rag-answer-text">
+                {{ rag_result.answer or rag_result.response or "답변을 생성하지 못했습니다." }}
+            </div>
         </section>
 
-        <section class="content-card">
-            <h2>참고한 행동요령</h2>
+        <section class="content-card reference-card">
+            <div class="rag-section-title">
+                <span class="rag-icon secondary-icon">DB</span>
+                <div>
+                    <h2>참고한 행동요령</h2>
+                    <p>AI 답변 생성에 활용된 자연재난 국민행동요령 검색 결과입니다.</p>
+                </div>
+            </div>
 
             {% if rag_result.references %}
-                <ul class="reference-list">
-                    {% for ref in rag_result.references %}
-                        <li>
-                            <strong>[{{ ref.disaster_type }}]</strong>
-                            {{ ref.title }}
-                            <span>점수: {{ ref.rag_score }}</span>
-                        </li>
+                <div class="reference-list">
+                    {% for item in rag_result.references %}
+                        <div class="reference-item">
+                            <div class="reference-main">
+                                <span class="reference-type">
+                                    {{
+                                        item.disaster_type
+                                        or item.disaster_category
+                                        or item.category
+                                        or item.type
+                                        or "재난유형 미분류"
+                                    }}
+                                </span>
+
+                                <strong>
+                                    {{
+                                        item.title
+                                        or item.guide_title
+                                        or item.name
+                                        or "행동요령 제목 없음"
+                                    }}
+                                </strong>
+                            </div>
+
+                            <div class="reference-score">
+                                {% set raw_score =
+                                    item.score
+                                    or item.final_score
+                                    or item.similarity_score
+                                    or item.total_score
+                                    or item.match_score
+                                %}
+
+                                {% if raw_score %}
+                                    점수 {{ raw_score }}
+                                {% else %}
+                                    점수 정보 없음
+                                {% endif %}
+                            </div>
+                        </div>
                     {% endfor %}
-                </ul>
+                </div>
             {% else %}
-                <p>참고한 행동요령이 없습니다.</p>
+                <p class="small-text">참고한 행동요령 데이터가 없습니다.</p>
             {% endif %}
         </section>
     {% endif %}
@@ -87,6 +187,14 @@
 <footer>
     SafeNavi Capstone Design Project
 </footer>
+
+<script>
+    function setExampleQuestion(text) {
+        const textarea = document.querySelector("textarea[name='question']");
+        textarea.value = text;
+        textarea.focus();
+    }
+</script>
 
 </body>
 </html>
