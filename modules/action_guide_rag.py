@@ -16,7 +16,7 @@ OUTPUT_PATH = os.path.join(
 
 def safe_read_csv(path):
     """
-    CSV 파일을 안전하게 불러온다.
+    CSV 파일을 불러온다.
     """
     if not os.path.exists(path):
         print(f"[행동요령 RAG] 파일 없음: {path}")
@@ -447,7 +447,7 @@ def generate_rag_answer(question, top_n=3):
 
 def print_rag_result(result):
     """
-    RAG 결과를 터미널에 보기 좋게 출력한다.
+    RAG 결과를 터미널에 출력한다.
     """
 
     print("======================================")

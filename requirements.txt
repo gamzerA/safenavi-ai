@@ -1,5 +1,6 @@
-flask
+Flask
 pandas
 requests
 python-dotenv
 gunicorn
+numpy

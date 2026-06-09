@@ -20,7 +20,7 @@ OUTPUT_PATH = os.path.join(
 
 def safe_read_csv(path):
     """
-    CSV 파일을 안전하게 불러온다.
+    CSV 파일을 불러온다.
     파일이 없거나 비어 있으면 빈 DataFrame을 반환한다.
     """
 
@@ -396,7 +396,7 @@ def generate_share_message(
 
         return message
 
-    # 기본 문구
+    # default message
     message_lines = []
 
     message_lines.append("[SafeNavi 안심 공유]")
@@ -463,8 +463,8 @@ def print_share_message(message):
 
 
 if __name__ == "__main__":
-    # 사용자 현재 위치 지역명 기준으로 재난문자를 필터링한다.
-    # 테스트 좌표가 용인이므로 user_region도 용인으로 맞춘다.
+    # 사용자 현재 위치 지역명 기준으로 재난문자를 필터링
+    # 테스트 좌표가 용인이므로 user_region도 용인으로 맞춤
     message = generate_share_message(
         user_status="안전",
         user_region="경기도 용인시",

@@ -19,7 +19,7 @@ LIVING_WEATHER_PATH = os.path.join(
 
 def safe_read_csv(path):
     """
-    CSV 파일을 안전하게 불러온다.
+    CSV 파일을 불러온다.
     파일이 없거나 비어 있으면 빈 DataFrame을 반환한다.
     """
 

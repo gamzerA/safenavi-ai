@@ -1,5 +1,9 @@
 import os
 import math
+import re
+from functools import lru_cache
+
+import numpy as np
 import pandas as pd
 
 
@@ -31,14 +35,225 @@ def safe_read_csv(path):
         return pd.read_csv(path, encoding="utf-8-sig")
     except pd.errors.EmptyDataError:
         return pd.DataFrame()
+    except Exception as e:
+        print(f"[대피소 추천] CSV 읽기 오류: {e}")
+        return pd.DataFrame()
+
+
+@lru_cache(maxsize=1)
+def load_shelters_cached():
+    """
+    shelters.csv를 한 번만 읽고 메모리에 저장한다.
+    웹에서 대피소 추천을 여러 번 요청할 때 속도를 줄이기 위한 캐시 함수다.
+    """
+
+    df = safe_read_csv(SHELTERS_PATH)
+
+    if df.empty:
+        return df
+
+    df["lat"] = pd.to_numeric(df["lat"], errors="coerce")
+    df["lon"] = pd.to_numeric(df["lon"], errors="coerce")
+
+    df = df.dropna(subset=["lat", "lon"]).copy()
+
+    return df
+
+
+@lru_cache(maxsize=1)
+def load_alerts_cached():
+    """
+    AI 분석된 재난문자 CSV를 한 번만 읽고 메모리에 저장한다.
+    """
+
+    return safe_read_csv(ALERTS_ANALYZED_PATH)
+
+
+def normalize_region_text(text):
+    """
+    지역명 비교를 위해 문자열을 정리한다.
+    예: '경기도 용인시' -> '경기도용인시'
+    """
+
+    text = str(text)
+    text = text.replace("nan", "")
+    text = re.sub(r"[^가-힣a-zA-Z0-9]", "", text)
+    return text
+
+
+def make_region_keywords(user_region):
+    """
+    사용자 지역명에서 시/군/구 단위 키워드를 만든다.
+
+    예:
+    user_region = '경기도 용인시'
+    -> ['용인시', '용인']
+
+    '경기도' 같은 광역 지자체명만으로는 매칭하지 않는다.
+    """
+
+    if user_region is None or str(user_region).strip() == "":
+        return []
+
+    user_region = str(user_region).strip()
+
+    broad_regions = [
+        "서울특별시", "부산광역시", "대구광역시", "인천광역시",
+        "광주광역시", "대전광역시", "울산광역시", "세종특별자치시",
+        "경기도", "강원특별자치도", "강원도", "충청북도", "충청남도",
+        "전북특별자치도", "전라북도", "전라남도",
+        "경상북도", "경상남도", "제주특별자치도"
+    ]
+
+    keywords = set()
+    parts = user_region.split()
+
+    for part in parts:
+        cleaned = normalize_region_text(part)
+
+        if not cleaned:
+            continue
+
+        if cleaned in broad_regions:
+            continue
+
+        keywords.add(cleaned)
+
+        if cleaned.endswith("시") or cleaned.endswith("군") or cleaned.endswith("구"):
+            keywords.add(cleaned[:-1])
+
+    full_cleaned = normalize_region_text(user_region)
+
+    if full_cleaned and full_cleaned not in broad_regions:
+        keywords.add(full_cleaned)
+
+    return [keyword for keyword in keywords if keyword]
+
+
+def region_matches(alert_region, user_region):
+    """
+    재난문자 지역이 사용자 지역과 관련 있는지 판단한다.
+    '경기도'만 같다고 같은 지역으로 보지 않고, 시/군/구 단위로 비교한다.
+    """
+
+    if user_region is None or str(user_region).strip() == "":
+        return False
+
+    alert_region_text = normalize_region_text(alert_region)
+    keywords = make_region_keywords(user_region)
+
+    if not alert_region_text or not keywords:
+        return False
+
+    for keyword in keywords:
+        if keyword in alert_region_text:
+            return True
+
+    return False
+
+
+def filter_natural_alerts_by_region(alerts_df, user_region=None):
+    """
+    AI 분석된 재난문자 중 자연재난 문자만 추출하고,
+    user_region이 있으면 해당 지역 관련 문자만 필터링한다.
+    """
+
+    if alerts_df.empty:
+        return pd.DataFrame()
+
+    if "is_natural_disaster" not in alerts_df.columns:
+        return pd.DataFrame()
+
+    natural_df = alerts_df[
+        (alerts_df["is_natural_disaster"] == True)
+        | (alerts_df["is_natural_disaster"].astype(str).str.lower() == "true")
+    ].copy()
+
+    if natural_df.empty:
+        return pd.DataFrame()
+
+    if user_region is None or str(user_region).strip() == "":
+        return natural_df
+
+    region_col = None
+
+    for candidate in ["ai_region", "region", "RCPTN_RGN_NM"]:
+        if candidate in natural_df.columns:
+            region_col = candidate
+            break
+
+    if region_col is None:
+        return pd.DataFrame()
+
+    filtered_df = natural_df[
+        natural_df[region_col].apply(
+            lambda x: region_matches(x, user_region)
+        )
+    ].copy()
+
+    return filtered_df
+
+
+def get_local_disaster_info(alerts_df, user_region=None):
+    """
+    사용자 지역 기준으로 실제 자연재난 문자가 있는지 확인한다.
+
+    반환값:
+    {
+        "has_local_alert": bool,
+        "main_disaster_type": str,
+        "risk_level": str,
+        "region": str
+    }
+    """
+
+    default_result = {
+        "has_local_alert": False,
+        "main_disaster_type": "일반 대비",
+        "risk_level": "낮음",
+        "region": user_region if user_region else "사용자 위치 주변"
+    }
+
+    natural_df = filter_natural_alerts_by_region(
+        alerts_df=alerts_df,
+        user_region=user_region
+    )
+
+    if natural_df.empty:
+        return default_result
+
+    if "created_at" in natural_df.columns:
+        natural_df["created_at_sort"] = pd.to_datetime(
+            natural_df["created_at"],
+            errors="coerce"
+        )
+
+        natural_df = natural_df.sort_values(
+            by="created_at_sort",
+            ascending=False
+        )
+
+    latest = natural_df.iloc[0]
+
+    main_type = latest.get("ai_disaster_type", "자연재난")
+    risk_level = latest.get("ai_risk_level", "주의")
+    region = latest.get("ai_region", latest.get("region", user_region or "지역 미확인"))
+
+    return {
+        "has_local_alert": True,
+        "main_disaster_type": str(main_type),
+        "risk_level": str(risk_level),
+        "region": str(region)
+    }
 
 
 def haversine_distance_km(lat1, lon1, lat2, lon2):
     """
     위도/경도 좌표 간 거리를 km 단위로 계산한다.
+    단일 거리 계산용 함수다.
     """
 
-    radius = 6371  # 지구 반지름 km
+    radius = 6371
 
     lat1 = math.radians(float(lat1))
     lon1 = math.radians(float(lon1))
@@ -58,31 +273,31 @@ def haversine_distance_km(lat1, lon1, lat2, lon2):
     return radius * c
 
 
-def get_latest_main_disaster_type(alerts_df):
+def calculate_distance_vectorized(candidate_df, user_lat, user_lon):
     """
-    AI 분석된 재난문자에서 가장 많이 나온 자연재난 유형을 가져온다.
-    자연재난 데이터가 없으면 기본값으로 호우/침수를 사용한다.
+    pandas/numpy를 사용해 여러 대피소와의 거리를 한 번에 계산한다.
+    반복문보다 훨씬 빠르다.
     """
 
-    if alerts_df.empty:
-        return "호우/침수"
+    earth_radius = 6371
 
-    if "is_natural_disaster" not in alerts_df.columns:
-        return "호우/침수"
+    lat1 = np.radians(float(user_lat))
+    lon1 = np.radians(float(user_lon))
 
-    # CSV에서 True가 문자열로 읽히는 경우도 대비
-    natural_df = alerts_df[
-        (alerts_df["is_natural_disaster"] == True)
-        | (alerts_df["is_natural_disaster"].astype(str).str.lower() == "true")
-    ]
+    lat2 = np.radians(candidate_df["lat"].astype(float))
+    lon2 = np.radians(candidate_df["lon"].astype(float))
 
-    if natural_df.empty:
-        return "호우/침수"
+    dlat = lat2 - lat1
+    dlon = lon2 - lon1
 
-    if "ai_disaster_type" not in natural_df.columns:
-        return "호우/침수"
+    a = (
+        np.sin(dlat / 2) ** 2
+        + np.cos(lat1) * np.cos(lat2) * np.sin(dlon / 2) ** 2
+    )
 
-    return natural_df["ai_disaster_type"].value_counts().idxmax()
+    c = 2 * np.arctan2(np.sqrt(a), np.sqrt(1 - a))
+
+    return earth_radius * c
 
 
 def get_shelter_match_score(shelter_type, disaster_type):
@@ -94,10 +309,23 @@ def get_shelter_match_score(shelter_type, disaster_type):
     - 호우/침수, 태풍, 산사태는 옥외시설 점수를 낮게 준다.
     - 폭염/한파는 쉼터와 실내시설을 우선한다.
     - 지진은 옥외대피장소를 우선한다.
+    - 일반 대비 상황은 거리와 수용 가능성을 중심으로 계산한다.
     """
 
     shelter_type = str(shelter_type)
     disaster_type = str(disaster_type)
+
+    # 실제 위험 문자가 없는 일반 대비 상황
+    if disaster_type == "일반 대비":
+        if "학교" in shelter_type or "공공" in shelter_type or "시설" in shelter_type:
+            return 22
+        if "수용" in shelter_type:
+            return 20
+        if "실내" in shelter_type:
+            return 20
+        if "옥외" in shelter_type:
+            return 12
+        return 15
 
     # 폭염
     if disaster_type == "폭염":
@@ -263,9 +491,11 @@ def get_display_address(row):
     return str(address)
 
 
-def make_recommend_reason(row, disaster_type):
+def make_recommend_reason(row, disaster_type, has_local_alert=False, user_region=None):
     """
     추천 사유 문장 생성.
+
+    has_local_alert가 False이면 실제 위험이 있다고 단정하지 않는다.
     """
 
     name = row.get("name", "대피소")
@@ -273,44 +503,54 @@ def make_recommend_reason(row, disaster_type):
     distance = row.get("distance_km", 0)
     address = get_display_address(row)
 
+    if not has_local_alert:
+        region_text = user_region if user_region else "사용자 지역"
+
+        return (
+            f"현재 {region_text}에 직접 확인된 자연재난 문자는 없지만, "
+            f"비상 상황에 대비해 현재 위치에서 가까운 대피소를 안내합니다. "
+            f"{name}은 현재 위치에서 약 {distance:.2f}km 떨어져 있으며, "
+            f"주소는 {address}, 대피소 유형은 {shelter_type}입니다."
+        )
+
     if disaster_type == "호우/침수":
         return (
-            f"현재 호우/침수 위험이 있어 실내 수용시설이나 공공시설을 우선 고려했습니다. "
+            f"현재 호우/침수 위험이 확인되어 실내 수용시설이나 공공시설을 우선 고려했습니다. "
             f"{name}은 현재 위치에서 약 {distance:.2f}km 떨어져 있으며, "
             f"주소는 {address}, 대피소 유형은 {shelter_type}입니다."
         )
 
     if disaster_type == "태풍":
         return (
-            f"현재 태풍 위험이 있어 외부 이동을 줄이고 안전한 실내 시설을 확인하는 것이 중요합니다. "
+            f"현재 태풍 위험이 확인되어 외부 이동을 줄이고 안전한 실내 시설을 확인하는 것이 중요합니다. "
             f"{name}은 현재 위치에서 약 {distance:.2f}km 떨어져 있으며, "
             f"주소는 {address}, 대피소 유형은 {shelter_type}입니다."
         )
 
     if disaster_type == "산사태":
         return (
-            f"현재 산사태 위험이 있어 급경사지나 산비탈을 피하고 안전한 시설로 이동하는 것이 좋습니다. "
+            f"현재 산사태 위험이 확인되어 급경사지나 산비탈을 피하고 안전한 시설로 이동하는 것이 좋습니다. "
             f"{name}은 현재 위치 기준 약 {distance:.2f}km 거리에 있으며, "
             f"주소는 {address}입니다."
         )
 
     if disaster_type == "폭염":
         return (
-            f"현재 폭염 위험이 있어 무더위쉼터 또는 실내 시설을 우선 추천했습니다. "
+            f"현재 폭염 위험이 확인되어 무더위쉼터 또는 실내 시설을 우선 추천했습니다. "
             f"{name}은 현재 위치에서 약 {distance:.2f}km 떨어져 있으며, "
             f"주소는 {address}입니다."
         )
 
     if disaster_type == "한파":
         return (
-            f"현재 한파 위험이 있어 한파쉼터 또는 실내 시설을 우선 추천했습니다. "
+            f"현재 한파 위험이 확인되어 한파쉼터 또는 실내 시설을 우선 추천했습니다. "
             f"{name}은 현재 위치에서 약 {distance:.2f}km 떨어져 있으며, "
             f"주소는 {address}입니다."
         )
 
     if disaster_type == "지진":
         return (
-            f"현재 지진 관련 위험에 대비해 지진옥외대피장소 또는 넓은 대피공간을 우선 추천했습니다. "
+            f"현재 지진 관련 위험이 확인되어 지진옥외대피장소 또는 넓은 대피공간을 우선 추천했습니다. "
             f"{name}은 현재 위치에서 약 {distance:.2f}km 떨어져 있으며, "
             f"주소는 {address}입니다."
         )
@@ -324,34 +564,23 @@ def make_recommend_reason(row, disaster_type):
 def recommend_shelters(
     user_lat,
     user_lon,
+    user_region=None,
     disaster_type=None,
     top_n=3,
-    max_distance_km=20
+    max_distance_km=10
 ):
     """
     사용자 위치와 재난 유형을 바탕으로 대피소 TOP N을 추천한다.
 
-    Parameters
-    ----------
-    user_lat : float
-        사용자 위도
-    user_lon : float
-        사용자 경도
-    disaster_type : str | None
-        재난 유형. None이면 최근 AI 재난문자에서 주요 유형을 자동 선택.
-    top_n : int
-        추천 개수
-    max_distance_km : float
-        최대 탐색 거리 km
-
-    Returns
-    -------
-    pandas.DataFrame
-        추천 대피소 결과
+    속도 개선 방식:
+    1. shelters.csv 캐싱
+    2. 사용자 위치 기준 위도/경도 박스 필터링
+    3. 후보 대피소만 거리 계산
+    4. 후보 대피소만 점수 계산
     """
 
-    shelters_df = safe_read_csv(SHELTERS_PATH)
-    alerts_df = safe_read_csv(ALERTS_ANALYZED_PATH)
+    shelters_df = load_shelters_cached().copy()
+    alerts_df = load_alerts_cached()
 
     if shelters_df.empty:
         raise ValueError("shelters.csv가 비어 있거나 없습니다.")
@@ -362,74 +591,119 @@ def recommend_shelters(
         if col not in shelters_df.columns:
             raise ValueError(f"shelters.csv에 필요한 컬럼이 없습니다: {col}")
 
-    if disaster_type is None:
-        disaster_type = get_latest_main_disaster_type(alerts_df)
+    user_lat = float(user_lat)
+    user_lon = float(user_lon)
 
-    shelters_df["lat"] = pd.to_numeric(shelters_df["lat"], errors="coerce")
-    shelters_df["lon"] = pd.to_numeric(shelters_df["lon"], errors="coerce")
+    local_disaster_info = get_local_disaster_info(
+        alerts_df=alerts_df,
+        user_region=user_region
+    )
 
-    shelters_df = shelters_df.dropna(subset=["lat", "lon"]).copy()
+    has_local_alert = local_disaster_info["has_local_alert"]
 
-    distances = []
+    # 사용자가 직접 재난 유형을 선택한 경우
+    if disaster_type is not None and str(disaster_type).strip() != "":
+        selected_disaster_type = str(disaster_type).strip()
 
-    for _, row in shelters_df.iterrows():
-        distance = haversine_distance_km(
-            user_lat,
-            user_lon,
-            row["lat"],
-            row["lon"]
-        )
-        distances.append(distance)
+        # 사용자가 직접 선택한 경우에도 실제 위험이 있다고 단정하지 않는다.
+        # 단, 해당 지역에 실제 재난문자가 있고 유형이 같으면 위험 확인으로 본다.
+        if (
+            has_local_alert
+            and local_disaster_info["main_disaster_type"] == selected_disaster_type
+        ):
+            reason_has_local_alert = True
+        else:
+            reason_has_local_alert = False
 
-    shelters_df["distance_km"] = distances
+    else:
+        # 자동 선택인 경우: 사용자 지역 재난문자가 있으면 그 유형, 없으면 일반 대비
+        selected_disaster_type = local_disaster_info["main_disaster_type"]
+        reason_has_local_alert = has_local_alert
 
-    # 너무 먼 시설 제외
-    shelters_df = shelters_df[shelters_df["distance_km"] <= max_distance_km].copy()
+    # 1차 후보 필터링: 사용자 위치 주변 대피소만 추림
+    lat_range = max_distance_km / 111
 
-    if shelters_df.empty:
+    cos_value = np.cos(np.radians(user_lat))
+
+    if abs(cos_value) < 0.0001:
+        lon_range = max_distance_km / 111
+    else:
+        lon_range = max_distance_km / (111 * cos_value)
+
+    candidate_df = shelters_df[
+        (shelters_df["lat"] >= user_lat - lat_range)
+        & (shelters_df["lat"] <= user_lat + lat_range)
+        & (shelters_df["lon"] >= user_lon - lon_range)
+        & (shelters_df["lon"] <= user_lon + lon_range)
+    ].copy()
+
+    if candidate_df.empty:
         raise ValueError("설정한 거리 안에 추천 가능한 대피소가 없습니다.")
 
-    shelters_df["distance_score"] = shelters_df["distance_km"].apply(get_distance_score)
-
-    shelters_df["match_score"] = shelters_df["shelter_type"].apply(
-        lambda x: get_shelter_match_score(x, disaster_type)
+    # 벡터 방식 거리 계산
+    candidate_df["distance_km"] = calculate_distance_vectorized(
+        candidate_df=candidate_df,
+        user_lat=user_lat,
+        user_lon=user_lon
     )
 
-    if "capacity" in shelters_df.columns:
-        shelters_df["capacity_score"] = shelters_df["capacity"].apply(get_capacity_score)
-    else:
-        shelters_df["capacity_score"] = 3
+    # 실제 거리 기준으로 다시 필터링
+    candidate_df = candidate_df[
+        candidate_df["distance_km"] <= max_distance_km
+    ].copy()
 
-    if "source" in shelters_df.columns:
-        shelters_df["source_score"] = shelters_df["source"].apply(get_source_score)
-    else:
-        shelters_df["source_score"] = 6
+    if candidate_df.empty:
+        raise ValueError("설정한 거리 안에 추천 가능한 대피소가 없습니다.")
 
-    shelters_df["recommend_score"] = (
-        shelters_df["distance_score"]
-        + shelters_df["match_score"]
-        + shelters_df["capacity_score"]
-        + shelters_df["source_score"]
+    candidate_df["distance_score"] = candidate_df["distance_km"].apply(get_distance_score)
+
+    candidate_df["match_score"] = candidate_df["shelter_type"].apply(
+        lambda x: get_shelter_match_score(x, selected_disaster_type)
     )
 
-    shelters_df = shelters_df.sort_values(
+    if "capacity" in candidate_df.columns:
+        candidate_df["capacity_score"] = candidate_df["capacity"].apply(get_capacity_score)
+    else:
+        candidate_df["capacity_score"] = 3
+
+    if "source" in candidate_df.columns:
+        candidate_df["source_score"] = candidate_df["source"].apply(get_source_score)
+    else:
+        candidate_df["source_score"] = 6
+
+    candidate_df["recommend_score"] = (
+        candidate_df["distance_score"]
+        + candidate_df["match_score"]
+        + candidate_df["capacity_score"]
+        + candidate_df["source_score"]
+    )
+
+    candidate_df = candidate_df.sort_values(
         by=["recommend_score", "distance_km"],
         ascending=[False, True]
     )
 
-    result = shelters_df.head(top_n).copy()
+    result = candidate_df.head(top_n).copy()
 
-    result["disaster_type"] = disaster_type
-
+    result["disaster_type"] = selected_disaster_type
+    result["has_local_alert"] = reason_has_local_alert
+    result["user_region"] = user_region if user_region else "사용자 위치 주변"
     result["display_address"] = result.apply(get_display_address, axis=1)
 
     result["recommend_reason"] = result.apply(
-        lambda row: make_recommend_reason(row, disaster_type),
+        lambda row: make_recommend_reason(
+            row=row,
+            disaster_type=selected_disaster_type,
+            has_local_alert=reason_has_local_alert,
+            user_region=user_region
+        ),
         axis=1
     )
 
     output_cols = [
         "disaster_type",
+        "has_local_alert",
+        "user_region",
         "name",
         "display_address",
         "address",
@@ -471,7 +745,10 @@ def print_recommendation_result(result):
         return
 
     disaster_type = result.iloc[0].get("disaster_type", "재난")
+    has_local_alert = result.iloc[0].get("has_local_alert", False)
+
     print(f"기준 재난 유형: {disaster_type}")
+    print(f"지역 재난문자 확인 여부: {has_local_alert}")
     print()
 
     for idx, (_, row) in enumerate(result.iterrows(), start=1):
@@ -491,18 +768,17 @@ def print_recommendation_result(result):
 
 
 if __name__ == "__main__":
-    # 테스트용 사용자 위치
-    # 실제 서비스에서는 사용자의 현재 위치 좌표를 여기에 넣으면 된다.
-    # 아래 좌표는 용인 지역 테스트용 임시 좌표다.
     USER_LAT = 37.2410
     USER_LON = 127.1776
+    USER_REGION = "경기도 용인시"
 
     result_df = recommend_shelters(
         user_lat=USER_LAT,
         user_lon=USER_LON,
+        user_region=USER_REGION,
         disaster_type=None,
         top_n=3,
-        max_distance_km=20
+        max_distance_km=10
     )
 
     print_recommendation_result(result_df)

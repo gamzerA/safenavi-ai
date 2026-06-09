@@ -24,22 +24,20 @@ def extract_region(message, api_region=None):
         추출된 지역명
     """
 
-    # 1. API에서 받은 지역명이 있으면 가장 우선 사용
+    # API에서 받은 지역명이 있으면 우선 사용
     if api_region is not None and str(api_region).strip():
         return str(api_region).strip()
 
     message = str(message)
 
-    # 2. 광역 + 기초 지역 형태 추출
-    # 예: 경기도 용인시, 서울특별시 강남구, 부산광역시 해운대구
+    # 광역, 기초 지역 형태 추출 (예: 경기도 용인시)
     pattern_two_words = r"([가-힣]+(?:특별시|광역시|특별자치시|특별자치도|도|시)\s+[가-힣]+(?:시|군|구))"
     match = re.search(pattern_two_words, message)
 
     if match:
         return match.group(1)
 
-    # 3. 단일 지역명 추출
-    # 예: 용인시, 처인구, 경기도
+    # 단일 지역명 추출 (예: 용인시, 처인구, 경기도)
     pattern_one_word = r"([가-힣]+(?:특별시|광역시|특별자치시|특별자치도|도|시|군|구))"
     match = re.search(pattern_one_word, message)
 
@@ -51,7 +49,7 @@ def extract_region(message, api_region=None):
 
 def contains_any(text, keywords):
     """
-    문장에 특정 키워드가 하나라도 포함되어 있는지 확인한다.
+    문장에 특정 키워드가 포함되어 있는지 확인한다.
     """
     text = str(text)
     return any(keyword in text for keyword in keywords)
@@ -103,7 +101,7 @@ def analyze_disaster_message(message, api_region=None):
         result["easy_summary"] = make_easy_summary(result)
         return result
 
-    # 1. 호우/침수
+    # 호우/침수
     if contains_any(
         message,
         ["호우", "폭우", "집중호우", "침수", "하천", "범람", "저지대", "지하차도", "하수도", "배수", "홍수"]
@@ -122,7 +120,7 @@ def analyze_disaster_message(message, api_region=None):
             "가까운 대피소 확인"
         ]
 
-    # 2. 폭염
+    # 폭염
     elif contains_any(
         message,
         ["폭염", "무더위", "온열질환", "체감온도", "더위", "열사병", "일사병"]
@@ -141,7 +139,7 @@ def analyze_disaster_message(message, api_region=None):
             "야외활동 자제"
         ]
 
-    # 3. 한파
+    # 한파
     elif contains_any(
         message,
         ["한파", "동파", "빙판", "저온", "강추위", "결빙", "한랭질환"]
@@ -160,7 +158,7 @@ def analyze_disaster_message(message, api_region=None):
             "외출 자제"
         ]
 
-    # 4. 지진
+    # 지진
     elif contains_any(
         message,
         ["지진", "진도", "여진", "흔들림", "낙하물"]
@@ -179,7 +177,7 @@ def analyze_disaster_message(message, api_region=None):
             "지진옥외대피장소 확인"
         ]
 
-    # 5. 태풍
+    # 태풍
     elif contains_any(
         message,
         ["태풍", "강풍", "풍랑", "해안가", "간판", "월파", "높은 파도"]
@@ -198,7 +196,7 @@ def analyze_disaster_message(message, api_region=None):
             "안전한 장소 이동"
         ]
 
-    # 6. 대설
+    # 대설
     elif contains_any(
         message,
         ["대설", "폭설", "눈길", "적설", "빙판길", "제설"]
@@ -217,7 +215,7 @@ def analyze_disaster_message(message, api_region=None):
             "외출 자제"
         ]
 
-    # 7. 지진해일/해일
+    # 지진해일/해일
     elif contains_any(
         message,
         ["지진해일", "해일", "쓰나미", "연안 침수"]
@@ -236,7 +234,7 @@ def analyze_disaster_message(message, api_region=None):
             "지진해일 대피장소 확인"
         ]
 
-    # 8. 산사태
+    # 산사태
     elif contains_any(
         message,
         ["산사태", "토사", "급경사지", "비탈면", "옹벽"]
@@ -255,7 +253,7 @@ def analyze_disaster_message(message, api_region=None):
             "지자체 안내 확인"
         ]
 
-    # 9. 기타 자연재난으로 판단하기 어려운 경우
+    # 기타 자연재난으로 판단하기 어려운 경우
     else:
         result["is_natural_disaster"] = False
         result["disaster_type"] = "기타/제외"

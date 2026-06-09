@@ -68,9 +68,7 @@ def get_default_user_location():
 
 
 
-# 1. 메인 화면
-
-
+# 메인
 @app.route("/")
 def index():
     """
@@ -85,7 +83,7 @@ def index():
 
 
 
-# 2. 오늘의 안전지수 화면
+# 오늘의 안전지수 화면
 
 
 @app.route("/safety")
@@ -140,7 +138,7 @@ def safety():
 
 
 
-# 3. 맞춤형 대피소 추천 화면
+# 맞춤형 대피소 추천 화면
 
 
 @app.route("/shelters", methods=["GET", "POST"])
@@ -164,7 +162,7 @@ def shelters():
     error_message = None
     has_searched = False
 
-    # 처음 페이지 접속 시에는 계산하지 않고 입력 화면만 보여준다.
+    # 처음 페이지 접속 시에는 계산하지 않고 입력 화면만 보여줌
     if request.method == "GET":
         return render_template(
             "shelters.html",
@@ -208,9 +206,10 @@ def shelters():
         result_df = recommend_shelters(
             user_lat=user_lat,
             user_lon=user_lon,
+            user_region=user_region,
             disaster_type=selected_disaster_type,
             top_n=3,
-            max_distance_km=20
+            max_distance_km=10
         )
 
         shelters_result = dataframe_to_dict_list(result_df)
@@ -233,7 +232,7 @@ def shelters():
 
 
 
-# 4. 행동요령 RAG 검색 화면
+# 행동요령 RAG 검색 화면
 
 
 @app.route("/guide", methods=["GET", "POST"])
@@ -274,7 +273,7 @@ def guide():
 
 
 
-# 5. 가족 안심 공유 문구 화면
+# 가족 안심 공유 문구 화면
 
 
 @app.route("/share", methods=["GET", "POST"])
@@ -298,7 +297,7 @@ def share():
     error_message = None
     has_generated = False
 
-    # 처음 페이지 접속 시에는 생성하지 않고 입력 화면만 보여준다.
+    # 처음 페이지 접속 시에는 생성하지 않고 입력 화면만 출력함
     if request.method == "GET":
         return render_template(
             "share.html",
@@ -356,7 +355,8 @@ def share():
 
 
 
-# 6. CSV 결과 확인용 
+# CSV 결과 확인용 화면
+
 
 @app.route("/data/shelters")
 def data_shelters():
@@ -382,7 +382,10 @@ def data_shelters():
     )
 
 
-# 7. 상태 확인용 경로
+
+# 상태 확인용 경로
+
+
 @app.route("/health")
 def health():
     """
@@ -396,6 +399,7 @@ def health():
 
 
 # 서버 실행
+
 
 if __name__ == "__main__":
     app.run(
