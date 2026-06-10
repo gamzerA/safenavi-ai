@@ -1610,3 +1610,112 @@ footer {
         margin-top: 4px;
     }
 }
+
+/* =========================================================
+   Safety Region Filter
+   오늘의 안전지수 지역 선택 영역
+   ========================================================= */
+
+.safety-region-card {
+    margin-bottom: 24px;
+    padding: 28px;
+}
+
+.safety-region-header {
+    margin-bottom: 18px;
+}
+
+.safety-region-header h2 {
+    margin-bottom: 8px;
+}
+
+.safety-region-header p {
+    max-width: 840px;
+    margin: 0;
+    color: #475569;
+    line-height: 1.75;
+}
+
+.safety-region-form {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 14px;
+    align-items: end;
+}
+
+.safety-region-field {
+    min-width: 0;
+}
+
+.safety-region-field input {
+    min-height: 48px;
+}
+
+.safety-region-form .form-button {
+    align-items: end;
+}
+
+@media screen and (max-width: 768px) {
+    .safety-region-form {
+        grid-template-columns: 1fr;
+    }
+
+    .safety-region-form .form-button {
+        flex-direction: column;
+        align-items: stretch;
+    }
+}
+
+/* =========================================================
+   Share Page Layout Fix
+   공유 위치 입력칸을 한 줄 전체로 배치하고,
+   상태/문구 스타일/생성 버튼을 그 아래에 정렬한다.
+   style.css 맨 아래에 추가하거나 기존 Share Page 영역 아래에 붙여넣기.
+   ========================================================= */
+
+.share-form-v2 {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+
+.share-location-block {
+    width: 100%;
+    padding: 18px;
+    border-radius: 18px;
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+}
+
+.share-location-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    gap: 10px;
+    align-items: center;
+}
+
+.share-option-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr auto;
+    gap: 16px;
+    align-items: end;
+}
+
+.share-option-grid .form-button {
+    justify-content: flex-end;
+}
+
+.location-button-row {
+    margin-top: 10px;
+}
+
+@media screen and (max-width: 900px) {
+    .share-location-row,
+    .share-option-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .share-option-grid .form-button {
+        justify-content: stretch;
+    }
+}

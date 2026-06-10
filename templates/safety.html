@@ -25,13 +25,78 @@
         <h1>오늘의 안전지수</h1>
         <p>
             긴급재난문자, 기상특보, 생활기상지수 데이터를 종합하여
-            현재 상황의 위험도를 계산합니다.
+            선택한 지역의 현재 위험도를 계산합니다.
         </p>
     </section>
 
+    <section class="content-card safety-region-card">
+        <div class="safety-region-header">
+            <div>
+                <p class="section-kicker">Region Filter</p>
+                <h2>지역별 안전지수 확인</h2>
+                <p>
+                    전국 기준으로 보거나, 시·도/시·군·구를 선택해서 해당 지역 중심의 재난문자와 위험 정보를 확인할 수 있습니다.
+                </p>
+            </div>
+        </div>
+
+        <form method="get" action="/safety" class="safety-region-form">
+            <div class="safety-region-field">
+                <label>지역 선택 또는 직접 입력</label>
+                <input
+                    type="text"
+                    name="region"
+                    list="regionOptions"
+                    value="{{ selected_region }}"
+                    placeholder="예: 경기도 용인시, 서울특별시, 처인구"
+                >
+
+                <datalist id="regionOptions">
+                    <option value="">전국 기준</option>
+                    {% for region in region_options %}
+                        <option value="{{ region }}">{{ region }}</option>
+                    {% endfor %}
+                </datalist>
+            </div>
+
+            <div class="form-button">
+                <button type="submit" class="btn primary">
+                    안전지수 확인
+                </button>
+
+                <a href="/safety" class="btn secondary">
+                    전국 기준
+                </a>
+            </div>
+        </form>
+
+        <p class="small-text">
+            현재 분석 기준:
+            <strong>
+                {% if safety_result.selected_region %}
+                    {{ safety_result.selected_region }}
+                {% else %}
+                    전국
+                {% endif %}
+            </strong>
+        </p>
+    </section>
+
+    {% if error_message %}
+        <div class="alert-box">
+            {{ error_message }}
+        </div>
+    {% endif %}
+
     <section class="safety-hero-card">
         <div class="safety-score-main">
-            <p class="safety-label">현재 안전 수준</p>
+            <p class="safety-label">
+                {% if safety_result.selected_region %}
+                    {{ safety_result.selected_region }} 안전 수준
+                {% else %}
+                    전국 안전 수준
+                {% endif %}
+            </p>
 
             <div class="safety-score-number">
                 {{ safety_result.safety_score }}
@@ -45,6 +110,11 @@
             <p class="safety-summary">
                 위험 점수는 {{ safety_result.risk_score }}점입니다.
                 점수가 높을수록 안전한 상태에 가깝습니다.
+                {% if safety_result.selected_region %}
+                    현재 결과는 선택 지역과 관련된 데이터를 우선 반영했습니다.
+                {% else %}
+                    현재 결과는 전체 수집 데이터를 기준으로 계산했습니다.
+                {% endif %}
             </p>
         </div>
 
@@ -64,6 +134,7 @@
 
                 <p>
                     위험도는 재난문자, 기상특보, 생활기상지수의 위험 점수를 합산하여 계산합니다.
+                    선택 지역이 있을 경우 지역명이 포함된 데이터만 우선 반영합니다.
                 </p>
             </div>
         </div>
@@ -73,7 +144,7 @@
         <div class="safety-stat-card">
             <span>재난문자 위험</span>
             <strong>{{ safety_result.alert_risk_score }}점</strong>
-            <p>자연재난 문자와 위험도 분석 결과</p>
+            <p>선택 지역 관련 자연재난 문자와 위험도 분석 결과</p>
         </div>
 
         <div class="safety-stat-card">

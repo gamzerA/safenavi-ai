@@ -4,6 +4,9 @@
     <meta charset="UTF-8">
     <title>안심 공유 | SafeNavi</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+
+    <!-- Daum/Kakao 우편번호 검색 -->
+    <script src="https://t1.kakaocdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js"></script>
 </head>
 <body>
 
@@ -24,7 +27,7 @@
         <p class="badge">Family Safety Share</p>
         <h1>가족 안심 공유 문구</h1>
         <p>
-            현재 위치 주변 재난 상황과 대피소 정보를 바탕으로
+            현재 위치 또는 선택한 주소를 기준으로 재난문자와 주변 대피소를 확인하고,
             가족에게 보낼 수 있는 안심 공유 문구를 자동 생성합니다.
         </p>
     </section>
@@ -32,40 +35,61 @@
     <section class="content-card share-input-card">
         <h2>공유 정보 입력</h2>
 
-        <form method="post" class="form-grid share-form">
-            <div>
-                <label>현재 상태</label>
-                <select name="user_status">
-                    <option value="안전" {% if user_status == "안전" %}selected{% endif %}>안전</option>
-                    <option value="이동 중" {% if user_status == "이동 중" %}selected{% endif %}>이동 중</option>
-                    <option value="대피 중" {% if user_status == "대피 중" %}selected{% endif %}>대피 중</option>
-                    <option value="도움 필요" {% if user_status == "도움 필요" %}selected{% endif %}>도움 필요</option>
-                </select>
+        <form method="post" class="share-form-v2" id="shareForm">
+            <input type="hidden" name="lat" id="shareLatInput" value="{{ user_lat if user_lat is defined else '' }}">
+            <input type="hidden" name="lon" id="shareLonInput" value="{{ user_lon if user_lon is defined else '' }}">
+            <input type="hidden" name="search_mode" id="shareSearchModeInput" value="{{ search_mode if search_mode is defined else 'manual' }}">
+
+            <div class="share-location-block">
+                <label>공유할 위치</label>
+                <div class="share-location-row">
+                    <input
+                        type="text"
+                        name="user_region"
+                        id="shareRegionInput"
+                        value="{{ user_region }}"
+                        placeholder="예: 경기도 용인시 처인구"
+                    >
+
+                    <button type="button" class="btn secondary" onclick="setShareCurrentLocation()">
+                        현재 위치로 입력
+                    </button>
+
+                    <button type="button" class="btn secondary" onclick="openSharePostcode()">
+                        주소 검색
+                    </button>
+                </div>
+
+                <p id="shareLocationStatus" class="small-text">
+                    현재 위치 또는 주소 검색을 사용하면 해당 위치 기준으로 주변 대피소가 다시 계산됩니다.
+                </p>
             </div>
 
-            <div>
-                <label>지역</label>
-                <input
-                    type="text"
-                    name="user_region"
-                    value="{{ user_region }}"
-                    placeholder="예: 경기도 용인시"
-                >
-            </div>
+            <div class="share-option-grid">
+                <div>
+                    <label>현재 상태</label>
+                    <select name="user_status">
+                        <option value="안전" {% if user_status == "안전" %}selected{% endif %}>안전</option>
+                        <option value="이동 중" {% if user_status == "이동 중" %}selected{% endif %}>이동 중</option>
+                        <option value="대피 중" {% if user_status == "대피 중" %}selected{% endif %}>대피 중</option>
+                        <option value="도움 필요" {% if user_status == "도움 필요" %}selected{% endif %}>도움 필요</option>
+                    </select>
+                </div>
 
-            <div>
-                <label>문구 스타일</label>
-                <select name="tone">
-                    <option value="normal" {% if tone == "normal" %}selected{% endif %}>기본형</option>
-                    <option value="short" {% if tone == "short" %}selected{% endif %}>짧은 문구</option>
-                    <option value="calm" {% if tone == "calm" %}selected{% endif %}>차분한 문구</option>
-                </select>
-            </div>
+                <div>
+                    <label>문구 스타일</label>
+                    <select name="tone">
+                        <option value="normal" {% if tone == "normal" %}selected{% endif %}>기본형</option>
+                        <option value="short" {% if tone == "short" %}selected{% endif %}>짧은 문구</option>
+                        <option value="calm" {% if tone == "calm" %}selected{% endif %}>차분한 문구</option>
+                    </select>
+                </div>
 
-            <div class="form-button">
-                <button type="submit" class="btn primary">
-                    공유 문구 생성
-                </button>
+                <div class="form-button">
+                    <button type="submit" class="btn primary">
+                        공유 문구 생성
+                    </button>
+                </div>
             </div>
         </form>
     </section>
@@ -83,7 +107,7 @@
                     <p class="share-result-label">Generated Message</p>
                     <h2>생성된 공유 문구</h2>
                     <p>
-                        아래 문구를 복사하거나, 모바일에서 바로 가족에게 공유할 수 있습니다.
+                        아래 문구는 선택한 공유 위치를 기준으로 생성되었습니다.
                     </p>
                 </div>
 
@@ -140,8 +164,8 @@
         <section class="content-card share-empty-card">
             <h2>안심 공유 문구를 만들어보세요</h2>
             <p>
-                현재 상태와 지역을 입력하면 가족에게 보낼 수 있는 문구가 자동으로 생성됩니다.
-                재난문자와 추천 대피소 정보를 함께 반영할 수 있습니다.
+                현재 상태와 공유할 위치를 입력하면 가족에게 보낼 수 있는 문구가 자동으로 생성됩니다.
+                현재 위치 또는 주소 검색을 활용하면 더 정확한 위치 기준으로 가까운 대피소를 반영할 수 있습니다.
             </p>
         </section>
     {% endif %}
@@ -225,6 +249,94 @@
 
     function nativeShareShortMessage() {
         nativeShare(getTextById("shortShareMessageText"), "shortShareStatus");
+    }
+
+    function setShareLocationValues(lat, lon, address, searchMode) {
+        document.getElementById("shareLatInput").value = lat;
+        document.getElementById("shareLonInput").value = lon;
+        document.getElementById("shareRegionInput").value = address;
+        document.getElementById("shareSearchModeInput").value = searchMode;
+    }
+
+    function setShareCurrentLocation() {
+        const status = document.getElementById("shareLocationStatus");
+
+        if (!navigator.geolocation) {
+            status.innerText = "이 브라우저에서는 현재 위치 기능을 지원하지 않습니다.";
+            return;
+        }
+
+        status.innerText = "현재 위치를 가져오는 중입니다. 위치 권한을 허용해주세요.";
+
+        navigator.geolocation.getCurrentPosition(
+            function(position) {
+                const lat = position.coords.latitude.toFixed(6);
+                const lon = position.coords.longitude.toFixed(6);
+
+                status.innerText = "현재 위치의 주소를 확인하는 중입니다.";
+
+                fetch(`/api/reverse-geocode?lat=${lat}&lon=${lon}`)
+                    .then(response => response.json())
+                    .then(data => {
+                        const address = data.status === "success"
+                            ? data.address
+                            : "현재 위치";
+
+                        setShareLocationValues(lat, lon, address, "current");
+                        status.innerText = "현재 위치가 입력되었습니다. 공유 문구 생성 버튼을 눌러주세요.";
+                    })
+                    .catch(function() {
+                        setShareLocationValues(lat, lon, "현재 위치", "current");
+                        status.innerText = "현재 위치가 입력되었습니다. 주소 변환은 실패했지만 대피소 계산은 현재 위치 기준으로 진행됩니다.";
+                    });
+            },
+            function() {
+                status.innerText = "현재 위치를 가져오지 못했습니다. 주소 검색 또는 직접 입력을 이용해주세요.";
+            },
+            {
+                enableHighAccuracy: true,
+                timeout: 10000,
+                maximumAge: 0
+            }
+        );
+    }
+
+    function openSharePostcode() {
+        const status = document.getElementById("shareLocationStatus");
+
+        new daum.Postcode({
+            oncomplete: function(data) {
+                let address = data.roadAddress;
+
+                if (!address) {
+                    address = data.jibunAddress;
+                }
+
+                if (!address) {
+                    status.innerText = "주소를 선택하지 못했습니다. 다시 검색해주세요.";
+                    return;
+                }
+
+                document.getElementById("shareRegionInput").value = address;
+                document.getElementById("shareSearchModeInput").value = "address";
+                status.innerText = "주소를 좌표로 변환하는 중입니다.";
+
+                fetch(`/api/geocode?address=${encodeURIComponent(address)}`)
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.status !== "success") {
+                            status.innerText = data.message || "주소 좌표 변환에 실패했습니다. 위치명만 반영됩니다.";
+                            return;
+                        }
+
+                        setShareLocationValues(data.lat, data.lon, address, "address");
+                        status.innerText = "주소가 입력되었습니다. 공유 문구 생성 버튼을 눌러주세요.";
+                    })
+                    .catch(function() {
+                        status.innerText = "주소 좌표 변환 중 오류가 발생했습니다.";
+                    });
+            }
+        }).open();
     }
 </script>
 

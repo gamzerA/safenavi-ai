@@ -4,6 +4,9 @@
     <meta charset="UTF-8">
     <title>SafeNavi</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+
+    <!-- Daum/Kakao 우편번호 검색 -->
+    <script src="https://t1.kakaocdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js"></script>
 </head>
 <body>
 
@@ -42,25 +45,34 @@
 
         <div class="hero-right">
             <div class="content-card location-card">
-                <h2>현재 테스트 위치</h2>
+                <h2>내 위치 기준 대피소 찾기</h2>
 
                 <p>
-                    <strong>지역</strong>
-                    {{ user_location.region }}
+                    현재 위치를 허용하거나 원하는 주소를 검색하면,
+                    가까운 대피소 TOP 3를 바로 추천받을 수 있습니다.
                 </p>
 
-                <p>
-                    <strong>위도</strong>
-                    {{ user_location.lat }}
-                </p>
+                <form method="post" action="/shelters" id="homeShelterForm">
+                    <input type="hidden" name="lat" id="homeLatInput">
+                    <input type="hidden" name="lon" id="homeLonInput">
+                    <input type="hidden" name="region" id="homeRegionInput">
+                    <input type="hidden" name="user_address" id="homeAddressInput">
+                    <input type="hidden" name="search_mode" id="homeSearchModeInput">
+                    <input type="hidden" name="disaster_type" value="">
 
-                <p>
-                    <strong>경도</strong>
-                    {{ user_location.lon }}
-                </p>
+                    <div class="button-row">
+                        <button type="button" class="btn primary" onclick="findShelterByCurrentLocation()">
+                            현재 위치로 추천받기
+                        </button>
 
-                <p class="small-text">
-                    실제 서비스에서는 사용자의 현재 위치 또는 지도 선택 위치로 변경할 수 있습니다.
+                        <button type="button" class="btn secondary" onclick="findShelterByAddress()">
+                            주소 검색으로 추천받기
+                        </button>
+                    </div>
+                </form>
+
+                <p id="homeLocationStatus" class="small-text">
+                    위도와 경도는 화면에 표시하지 않고 대피소 거리 계산에만 사용됩니다.
                 </p>
             </div>
         </div>
@@ -78,7 +90,7 @@
         <div class="feature-card">
             <h2>맞춤형 대피소 추천</h2>
             <p>
-                사용자 위치와 재난 유형을 기준으로 가까운 대피소 TOP 3를 추천합니다.
+                현재 위치 또는 주소 검색을 기준으로 가까운 대피소 TOP 3를 추천합니다.
             </p>
             <a href="/shelters" class="card-link">추천받기 →</a>
         </div>
@@ -94,7 +106,7 @@
         <div class="feature-card">
             <h2>가족 안심 공유</h2>
             <p>
-                현재 상황과 대피소 정보를 가족에게 보낼 문구로 자동 생성합니다.
+                현재 상황과 위치 정보를 가족에게 보낼 문구로 자동 생성합니다.
             </p>
             <a href="/share" class="card-link">문구 만들기 →</a>
         </div>
@@ -105,6 +117,92 @@
 <footer>
     SafeNavi Capstone Design Project
 </footer>
+
+<script>
+    function submitHomeShelterForm(lat, lon, address, searchMode) {
+        document.getElementById("homeLatInput").value = lat;
+        document.getElementById("homeLonInput").value = lon;
+        document.getElementById("homeRegionInput").value = address;
+        document.getElementById("homeAddressInput").value = address;
+        document.getElementById("homeSearchModeInput").value = searchMode;
+
+        document.getElementById("homeShelterForm").submit();
+    }
+
+    function findShelterByCurrentLocation() {
+        const status = document.getElementById("homeLocationStatus");
+
+        if (!navigator.geolocation) {
+            status.innerText = "이 브라우저에서는 현재 위치 기능을 지원하지 않습니다.";
+            return;
+        }
+
+        status.innerText = "현재 위치를 가져오는 중입니다. 위치 권한을 허용해주세요.";
+
+        navigator.geolocation.getCurrentPosition(
+            function(position) {
+                const lat = position.coords.latitude.toFixed(6);
+                const lon = position.coords.longitude.toFixed(6);
+
+                fetch(`/api/reverse-geocode?lat=${lat}&lon=${lon}`)
+                    .then(response => response.json())
+                    .then(data => {
+                        const address = data.status === "success"
+                            ? data.address
+                            : "현재 위치";
+
+                        submitHomeShelterForm(lat, lon, address, "current");
+                    })
+                    .catch(function() {
+                        submitHomeShelterForm(lat, lon, "현재 위치", "current");
+                    });
+            },
+            function() {
+                status.innerText = "현재 위치를 가져오지 못했습니다. 주소 검색을 이용해주세요.";
+            },
+            {
+                enableHighAccuracy: true,
+                timeout: 10000,
+                maximumAge: 0
+            }
+        );
+    }
+
+    function findShelterByAddress() {
+        const status = document.getElementById("homeLocationStatus");
+
+        new daum.Postcode({
+            oncomplete: function(data) {
+                let address = data.roadAddress;
+
+                if (!address) {
+                    address = data.jibunAddress;
+                }
+
+                if (!address) {
+                    status.innerText = "주소를 선택하지 못했습니다. 다시 검색해주세요.";
+                    return;
+                }
+
+                status.innerText = "주소를 좌표로 변환하는 중입니다.";
+
+                fetch(`/api/geocode?address=${encodeURIComponent(address)}`)
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.status !== "success") {
+                            status.innerText = data.message || "주소 좌표 변환에 실패했습니다.";
+                            return;
+                        }
+
+                        submitHomeShelterForm(data.lat, data.lon, address, "address");
+                    })
+                    .catch(function() {
+                        status.innerText = "주소 좌표 변환 중 오류가 발생했습니다.";
+                    });
+            }
+        }).open();
+    }
+</script>
 
 </body>
 </html>

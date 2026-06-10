@@ -49,15 +49,13 @@ def normalize_region_text(text):
 
 def make_region_keywords(user_region):
     """
-    사용자 지역명에서 비교용 키워드를 만든다.
+    사용자 지역명에서 재난문자 비교용 키워드를 만든다.
 
     핵심:
-    - '경기도', '전라남도' 같은 광역시도명은 단독 비교에서 제외한다.
-    - '용인시', '용인'처럼 시/군/구 단위만 사용한다.
-
-    예:
-    user_region = '경기도 용인시'
-    → ['용인시', '용인']
+    - '경기도' 같은 광역 지자체명만으로는 매칭하지 않는다.
+    - 상세주소가 들어와도 '용인시', '처인구', '용인', '처인'처럼
+      시/군/구 단위 키워드를 우선 사용한다.
+    - 도로명, 번지, 숫자처럼 재난문자 지역명과 잘 맞지 않는 값은 제외한다.
     """
 
     if user_region is None or str(user_region).strip() == "":
@@ -65,17 +63,16 @@ def make_region_keywords(user_region):
 
     user_region = str(user_region).strip()
 
-    # 단독으로 비교하면 너무 넓은 광역 지자체명
     broad_regions = [
         "서울특별시", "부산광역시", "대구광역시", "인천광역시",
         "광주광역시", "대전광역시", "울산광역시", "세종특별자치시",
-        "경기도", "강원특별자치도", "충청북도", "충청남도",
+        "경기도", "강원특별자치도", "강원도", "충청북도", "충청남도",
         "전북특별자치도", "전라북도", "전라남도",
-        "경상북도", "경상남도", "제주특별자치도"
+        "경상북도", "경상남도", "제주특별자치도", "제주도"
     ]
 
+    ignore_suffixes = ["로", "길", "번길", "대로"]
     keywords = set()
-
     parts = user_region.split()
 
     for part in parts:
@@ -84,25 +81,29 @@ def make_region_keywords(user_region):
         if not cleaned:
             continue
 
-        # 광역시도명은 단독 키워드에서 제외
         if cleaned in broad_regions:
             continue
 
-        keywords.add(cleaned)
+        # 숫자/번지만 있는 값은 제외
+        if cleaned.isdigit():
+            continue
 
-        # 용인시 -> 용인
-        if cleaned.endswith("시") or cleaned.endswith("군") or cleaned.endswith("구"):
-            keywords.add(cleaned[:-1])
+        # 도로명은 재난문자 지역 컬럼과 매칭률이 낮으므로 제외
+        if any(cleaned.endswith(suffix) for suffix in ignore_suffixes):
+            continue
 
-    # 만약 사용자가 '용인시'처럼 한 단어만 넣은 경우 대비
-    full_cleaned = normalize_region_text(user_region)
+        # 시/군/구/읍/면/동 단위는 적극 사용
+        if cleaned.endswith(("시", "군", "구", "읍", "면", "동")):
+            keywords.add(cleaned)
+            if len(cleaned) > 1:
+                keywords.add(cleaned[:-1])
+            continue
 
-    if full_cleaned and full_cleaned not in broad_regions:
-        # '경기도용인시' 전체는 너무 길지만 보조용으로 추가 가능
-        keywords.add(full_cleaned)
+        # 그 외 단어는 너무 짧은 값만 제외하고 보조 키워드로 사용
+        if len(cleaned) >= 2:
+            keywords.add(cleaned)
 
     return [keyword for keyword in keywords if keyword]
-
 
 def region_matches(alert_region, user_region):
     """
@@ -336,7 +337,8 @@ def generate_share_message(
     user_status="안전",
     user_region="경기도 용인시",
     include_shelter=True,
-    tone="normal"
+    tone="normal",
+    recommended_df=None
 ):
     """
     가족에게 보낼 안심 공유 문구를 생성한다.
@@ -351,10 +353,17 @@ def generate_share_message(
         추천 대피소 정보를 포함할지 여부
     tone : str
         normal 또는 short
+    recommended_df : pandas.DataFrame or None
+        공유 페이지에서 선택한 현재 위치/주소 기준으로 새로 계산한 추천 대피소 결과.
+        None이면 기존 recommended_shelters.csv를 읽는다.
     """
 
     alerts_df = safe_read_csv(ALERTS_ANALYZED_PATH)
-    recommended_df = safe_read_csv(RECOMMENDED_SHELTERS_PATH)
+
+    if recommended_df is None:
+        recommended_df = safe_read_csv(RECOMMENDED_SHELTERS_PATH)
+    elif not isinstance(recommended_df, pd.DataFrame):
+        recommended_df = pd.DataFrame(recommended_df)
 
     disaster_info = get_latest_main_disaster_info(
         alerts_df=alerts_df,

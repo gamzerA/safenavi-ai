@@ -15,6 +15,9 @@
     <script
         src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js">
     </script>
+
+    <!-- Daum/Kakao 우편번호 검색 -->
+    <script src="https://t1.kakaocdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js"></script>
 </head>
 <body>
 
@@ -35,52 +38,59 @@
         <p class="badge">Shelter Recommendation</p>
         <h1>맞춤형 대피소 TOP 3 추천</h1>
         <p>
-            사용자의 현재 위치를 기반으로 가까운 대피소를 찾고,
+            현재 위치 또는 원하는 주소를 기준으로 가까운 대피소를 찾고,
             재난 유형별 적합도와 거리 점수를 반영하여 추천합니다.
         </p>
     </section>
 
     <section class="content-card">
-        <h2>사용자 위치 입력</h2>
+        <h2>대피소 추천 기준 선택</h2>
 
         <div class="location-guide">
             <p>
-                현재 위치를 자동으로 가져오거나, 직접 위도와 경도를 입력할 수 있습니다.
-                브라우저에서 위치 권한을 허용하면 현재 위치 기준으로 대피소를 추천합니다.
+                현재 위치를 기준으로 주변 대피소를 찾거나, 원하는 주소를 검색하여 해당 위치 주변의 대피소를 추천받을 수 있습니다.
+                위도와 경도는 화면에 표시하지 않고, 거리 계산과 지도 표시를 위해 내부적으로만 사용됩니다.
             </p>
         </div>
 
         <form method="post" class="form-grid" id="shelterForm">
-            <div>
-                <label>지역명</label>
-                <input
-                    type="text"
-                    name="region"
-                    id="regionInput"
-                    value="{{ user_region }}"
-                    placeholder="예: 경기도 용인시"
-                >
-            </div>
+            <input
+                type="hidden"
+                name="lat"
+                id="latInput"
+                value="{% if has_searched %}{{ user_lat }}{% endif %}"
+            >
+
+            <input
+                type="hidden"
+                name="lon"
+                id="lonInput"
+                value="{% if has_searched %}{{ user_lon }}{% endif %}"
+            >
+
+            <input
+                type="hidden"
+                name="region"
+                id="regionInput"
+                value="{{ user_region }}"
+            >
+
+            <input
+                type="hidden"
+                name="search_mode"
+                id="searchModeInput"
+                value="{{ search_mode if search_mode else 'default' }}"
+            >
 
             <div>
-                <label>위도</label>
+                <label>추천 기준 위치</label>
                 <input
                     type="text"
-                    name="lat"
-                    id="latInput"
-                    value="{{ user_lat }}"
-                    placeholder="예: 37.2410"
-                >
-            </div>
-
-            <div>
-                <label>경도</label>
-                <input
-                    type="text"
-                    name="lon"
-                    id="lonInput"
-                    value="{{ user_lon }}"
-                    placeholder="예: 127.1776"
+                    name="user_address"
+                    id="addressInput"
+                    value="{{ user_address if user_address else '' }}"
+                    placeholder="현재 위치 또는 주소 검색 결과가 표시됩니다."
+                    readonly
                 >
             </div>
 
@@ -101,10 +111,15 @@
 
             <div class="form-button button-row">
                 <button type="button" class="btn secondary" onclick="getCurrentLocation()">
-                    현재 위치 가져오기
+                    현재 위치로 찾기
                 </button>
+
+                <button type="button" class="btn secondary" onclick="openPostcode()">
+                    주소 검색
+                </button>
+
                 <button type="submit" class="btn primary">
-                    대피소 추천
+                    선택한 위치로 추천
                 </button>
             </div>
         </form>
@@ -123,7 +138,7 @@
 
         {% if has_searched and shelters %}
             <p class="small-text">
-                파란색 마커는 사용자 위치, 숫자 마커는 추천 대피소 TOP 3입니다.
+                파란색 마커는 추천 기준 위치, 숫자 마커는 추천 대피소 TOP 3입니다.
                 마커를 클릭하면 네이버지도 위치 확인과 네이버지도 앱 길찾기를 사용할 수 있습니다.
             </p>
         {% elif has_searched and not shelters %}
@@ -132,7 +147,7 @@
             </p>
         {% else %}
             <p class="small-text">
-                현재 위치를 가져온 뒤 <strong>대피소 추천</strong> 버튼을 누르면 지도에 추천 대피소가 표시됩니다.
+                현재 위치 또는 주소를 선택하면 가까운 대피소 TOP 3가 지도에 표시됩니다.
             </p>
         {% endif %}
 
@@ -196,14 +211,14 @@
 
                         <a
                             class="btn secondary route-btn"
-                            href="nmap://route/walk?slat={{ user_lat }}&slng={{ user_lon }}&sname=%ED%98%84%EC%9E%AC%EC%9C%84%EC%B9%98&dlat={{ shelter.lat }}&dlng={{ shelter.lon }}&dname={{ shelter.name|urlencode }}&appname=safenavi"
+                            href="nmap://route/walk?slat={{ user_lat }}&slng={{ user_lon }}&sname=%EC%B6%94%EC%B2%9C%EA%B8%B0%EC%A4%80%EC%9C%84%EC%B9%98&dlat={{ shelter.lat }}&dlng={{ shelter.lon }}&dname={{ shelter.name|urlencode }}&appname=safenavi"
                         >
                             네이버 도보
                         </a>
 
                         <a
                             class="btn secondary route-btn"
-                            href="nmap://route/car?slat={{ user_lat }}&slng={{ user_lon }}&sname=%ED%98%84%EC%9E%AC%EC%9C%84%EC%B9%98&dlat={{ shelter.lat }}&dlng={{ shelter.lon }}&dname={{ shelter.name|urlencode }}&appname=safenavi"
+                            href="nmap://route/car?slat={{ user_lat }}&slng={{ user_lon }}&sname=%EC%B6%94%EC%B2%9C%EA%B8%B0%EC%A4%80%EC%9C%84%EC%B9%98&dlat={{ shelter.lat }}&dlng={{ shelter.lon }}&dname={{ shelter.name|urlencode }}&appname=safenavi"
                         >
                             네이버 자차
                         </a>
@@ -219,7 +234,7 @@
                 {% if has_searched %}
                     <p>추천 결과가 없습니다. 위치 정보나 재난 유형을 다시 확인해주세요.</p>
                 {% else %}
-                    <p>위치 정보를 확인한 뒤 <strong>대피소 추천</strong> 버튼을 눌러주세요.</p>
+                    <p>현재 위치 또는 주소를 선택하면 가까운 대피소를 추천받을 수 있습니다.</p>
                 {% endif %}
             </div>
         {% endif %}
@@ -258,7 +273,7 @@
 
         L.marker([defaultLat, defaultLon], { icon: userIcon })
             .addTo(map)
-            .bindPopup("<strong>현재 위치</strong><br>대피소 추천 기준 위치");
+            .bindPopup("<strong>추천 기준 위치</strong><br>대피소 추천 기준 위치");
 
         const bounds = [[defaultLat, defaultLon]];
 
@@ -287,7 +302,7 @@
                         : Number(shelter.recommend_score).toFixed(1) + "점";
 
                     const encodedShelterName = encodeURIComponent(shelterName);
-                    const encodedCurrentName = encodeURIComponent("현재위치");
+                    const encodedCurrentName = encodeURIComponent("추천기준위치");
 
                     const naverWebUrl =
                         `https://map.naver.com/p/search/${encodedShelterName}`;
@@ -328,6 +343,18 @@
         }
     }
 
+    function submitShelterForm() {
+        document.getElementById("shelterForm").submit();
+    }
+
+    function setLocationValues(lat, lon, address, searchMode) {
+        document.getElementById("latInput").value = lat;
+        document.getElementById("lonInput").value = lon;
+        document.getElementById("addressInput").value = address;
+        document.getElementById("regionInput").value = address;
+        document.getElementById("searchModeInput").value = searchMode;
+    }
+
     function getCurrentLocation() {
         const status = document.getElementById("locationStatus");
 
@@ -340,28 +367,41 @@
 
         navigator.geolocation.getCurrentPosition(
             function(position) {
-                const lat = position.coords.latitude;
-                const lon = position.coords.longitude;
+                const lat = position.coords.latitude.toFixed(6);
+                const lon = position.coords.longitude.toFixed(6);
 
-                document.getElementById("latInput").value = lat.toFixed(6);
-                document.getElementById("lonInput").value = lon.toFixed(6);
+                status.innerText = "현재 위치 주소를 확인하는 중입니다.";
 
-                status.innerText =
-                    "현재 위치를 가져왔습니다. 대피소 추천 버튼을 누르면 현재 위치 기준으로 추천됩니다.";
+                fetch(`/api/reverse-geocode?lat=${lat}&lon=${lon}`)
+                    .then(response => response.json())
+                    .then(data => {
+                        const address = data.status === "success"
+                            ? data.address
+                            : "현재 위치 기준";
 
-                if (map) {
-                    map.setView([lat, lon], 15);
-                }
+                        setLocationValues(lat, lon, address, "current");
+
+                        status.innerText = "현재 위치를 기준으로 대피소를 추천합니다.";
+
+                        submitShelterForm();
+                    })
+                    .catch(function() {
+                        setLocationValues(lat, lon, "현재 위치 기준", "current");
+
+                        status.innerText = "현재 위치를 기준으로 대피소를 추천합니다.";
+
+                        submitShelterForm();
+                    });
             },
             function(error) {
                 if (error.code === error.PERMISSION_DENIED) {
-                    status.innerText = "위치 권한이 거부되었습니다. 브라우저에서 위치 권한을 허용하거나 좌표를 직접 입력해주세요.";
+                    status.innerText = "위치 권한이 거부되었습니다. 주소 검색을 이용해주세요.";
                 } else if (error.code === error.POSITION_UNAVAILABLE) {
-                    status.innerText = "현재 위치 정보를 사용할 수 없습니다. 좌표를 직접 입력해주세요.";
+                    status.innerText = "현재 위치 정보를 사용할 수 없습니다. 주소 검색을 이용해주세요.";
                 } else if (error.code === error.TIMEOUT) {
                     status.innerText = "현재 위치 요청 시간이 초과되었습니다. 다시 시도해주세요.";
                 } else {
-                    status.innerText = "현재 위치를 가져오지 못했습니다. 좌표를 직접 입력해주세요.";
+                    status.innerText = "현재 위치를 가져오지 못했습니다. 주소 검색을 이용해주세요.";
                 }
             },
             {
@@ -370,6 +410,49 @@
                 maximumAge: 0
             }
         );
+    }
+
+    function openPostcode() {
+        const status = document.getElementById("locationStatus");
+
+        new daum.Postcode({
+            oncomplete: function(data) {
+                let address = data.roadAddress;
+
+                if (!address) {
+                    address = data.jibunAddress;
+                }
+
+                if (!address) {
+                    status.innerText = "주소를 선택하지 못했습니다. 다시 검색해주세요.";
+                    return;
+                }
+
+                document.getElementById("addressInput").value = address;
+                document.getElementById("regionInput").value = address;
+                document.getElementById("searchModeInput").value = "address";
+
+                status.innerText = "주소를 좌표로 변환하는 중입니다.";
+
+                fetch(`/api/geocode?address=${encodeURIComponent(address)}`)
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.status !== "success") {
+                            status.innerText = data.message || "주소 좌표 변환에 실패했습니다.";
+                            return;
+                        }
+
+                        setLocationValues(data.lat, data.lon, address, "address");
+
+                        status.innerText = "선택한 주소를 기준으로 대피소를 추천합니다.";
+
+                        submitShelterForm();
+                    })
+                    .catch(function() {
+                        status.innerText = "주소 좌표 변환 중 오류가 발생했습니다.";
+                    });
+            }
+        }).open();
     }
 
     document.addEventListener("DOMContentLoaded", initMap);

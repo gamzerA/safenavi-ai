@@ -1,4 +1,5 @@
 import os
+import requests
 import pandas as pd
 from flask import Flask, render_template, request
 
@@ -21,8 +22,11 @@ SHARE_MESSAGE_PATH = os.path.join(
     DATA_DIR, "share_message.txt"
 )
 
+KAKAO_REST_API_KEY = os.environ.get("KAKAO_REST_API_KEY", "")
+
 
 app = Flask(__name__)
+
 
 
 # 공통 함수
@@ -58,7 +62,7 @@ def dataframe_to_dict_list(df):
 def get_default_user_location():
     """
     테스트용 기본 사용자 위치.
-    실제 서비스에서는 브라우저 GPS 좌표가 POST 요청으로 들어온다.
+    실제 서비스에서는 브라우저 GPS 좌표 또는 주소 검색 좌표가 POST 요청으로 들어온다.
     """
     return {
         "lat": 37.2410,
@@ -66,6 +70,147 @@ def get_default_user_location():
         "region": "경기도 용인시"
     }
 
+
+# 주소 변환 API
+
+@app.route("/api/geocode")
+def geocode_address():
+    """
+    주소를 위도·경도로 변환한다.
+    주소 검색 기반 대피소 추천에서 사용한다.
+    """
+
+    address = request.args.get("address", "").strip()
+
+    if address == "":
+        return {
+            "status": "error",
+            "message": "주소가 비어 있습니다."
+        }, 400
+
+    if not KAKAO_REST_API_KEY:
+        return {
+            "status": "error",
+            "message": "KAKAO_REST_API_KEY가 설정되어 있지 않습니다."
+        }, 500
+
+    try:
+        response = requests.get(
+            "https://dapi.kakao.com/v2/local/search/address.json",
+            headers={
+                "Authorization": f"KakaoAK {KAKAO_REST_API_KEY}"
+            },
+            params={
+                "query": address
+            },
+            timeout=5
+        )
+
+        response.raise_for_status()
+
+        data = response.json()
+        documents = data.get("documents", [])
+
+        if not documents:
+            return {
+                "status": "error",
+                "message": "주소 좌표를 찾지 못했습니다."
+            }, 404
+
+        first = documents[0]
+
+        return {
+            "status": "success",
+            "address": address,
+            "lat": first.get("y"),
+            "lon": first.get("x")
+        }
+
+    except Exception as e:
+        print(f"[주소 좌표 변환 오류] {e}")
+
+        return {
+            "status": "error",
+            "message": "주소 좌표 변환 중 오류가 발생했습니다."
+        }, 500
+
+
+@app.route("/api/reverse-geocode")
+def reverse_geocode():
+    """
+    위도·경도를 주소로 변환한다.
+    현재 위치 기반 대피소 추천 표시용, 가족 안심 공유 위치 입력용으로 사용한다.
+    """
+
+    lat = request.args.get("lat", "").strip()
+    lon = request.args.get("lon", "").strip()
+
+    if lat == "" or lon == "":
+        return {
+            "status": "error",
+            "message": "위치 좌표가 비어 있습니다."
+        }, 400
+
+    if not KAKAO_REST_API_KEY:
+        return {
+            "status": "error",
+            "message": "KAKAO_REST_API_KEY가 설정되어 있지 않습니다."
+        }, 500
+
+    try:
+        response = requests.get(
+            "https://dapi.kakao.com/v2/local/geo/coord2address.json",
+            headers={
+                "Authorization": f"KakaoAK {KAKAO_REST_API_KEY}"
+            },
+            params={
+                "x": lon,
+                "y": lat
+            },
+            timeout=5
+        )
+
+        response.raise_for_status()
+
+        data = response.json()
+        documents = data.get("documents", [])
+
+        if not documents:
+            return {
+                "status": "error",
+                "message": "현재 위치의 주소를 찾지 못했습니다."
+            }, 404
+
+        first = documents[0]
+
+        road_address = first.get("road_address")
+        jibun_address = first.get("address")
+
+        address_name = ""
+
+        if road_address:
+            address_name = road_address.get("address_name", "")
+
+        if address_name == "" and jibun_address:
+            address_name = jibun_address.get("address_name", "")
+
+        if address_name == "":
+            address_name = "현재 위치"
+
+        return {
+            "status": "success",
+            "lat": lat,
+            "lon": lon,
+            "address": address_name
+        }
+
+    except Exception as e:
+        print(f"[현재 위치 주소 변환 오류] {e}")
+
+        return {
+            "status": "error",
+            "message": "현재 위치 주소 변환 중 오류가 발생했습니다."
+        }, 500
 
 
 # RAG 결과 화면 표시용 정규화 함수
@@ -87,7 +232,8 @@ def infer_disaster_type_from_text(text):
         "지진해일": ["지진해일", "해일", "쓰나미"],
         "산사태": ["산사태", "토사", "비탈", "급경사지"],
         "낙뢰": ["낙뢰", "번개", "천둥"],
-        "황사": ["황사", "미세먼지"]
+        "황사": ["황사", "미세먼지"],
+        "화재": ["화재", "불", "연기", "소화기", "119", "엘리베이터"]
     }
 
     for disaster_type, keywords in keyword_map.items():
@@ -189,26 +335,11 @@ def normalize_reference_item(item):
 def normalize_rag_result(rag_result, question=""):
     """
     action_guide_rag.py에서 반환한 결과를 guide.html에서 쓰기 쉬운 구조로 정리한다.
-
-    최종 화면용 구조:
-    {
-        "disaster_type": "...",
-        "situation_type": "...",
-        "answer": "...",
-        "references": [
-            {
-                "disaster_type": "...",
-                "title": "...",
-                "score": "..."
-            }
-        ]
-    }
     """
 
     if rag_result is None:
         return None
 
-    # 혹시 문자열로 바로 답변이 온 경우
     if not isinstance(rag_result, dict):
         answer_text = str(rag_result)
 
@@ -227,7 +358,7 @@ def normalize_rag_result(rag_result, question=""):
 
     situation_type = get_first_value(
         rag_result,
-        ["situation_type", "situation", "stage", "context_type"],
+        ["situation_type_korean", "situation_type", "situation", "stage", "context_type"],
         default="일반 상황"
     )
 
@@ -270,7 +401,6 @@ def normalize_rag_result(rag_result, question=""):
                 normalize_reference_item(item)
             )
 
-    # disaster_type이 비어 있으면 참고 문헌 또는 질문/답변에서 추정
     if disaster_type == "":
         if normalized_references:
             disaster_type = normalized_references[0].get("disaster_type", "")
@@ -289,7 +419,6 @@ def normalize_rag_result(rag_result, question=""):
     }
 
 
-
 # 메인 화면
 
 @app.route("/")
@@ -305,37 +434,74 @@ def index():
     )
 
 
-
 # 오늘의 안전지수 화면
 
-@app.route("/safety")
+@app.route("/safety", methods=["GET", "POST"])
 def safety():
     """
     오늘의 안전지수 결과 화면.
+    지역 선택값이 있으면 해당 지역 기준으로 안전지수를 계산한다.
     """
 
+    region_options = [
+        "서울특별시",
+        "부산광역시",
+        "대구광역시",
+        "인천광역시",
+        "광주광역시",
+        "대전광역시",
+        "울산광역시",
+        "세종특별자치시",
+        "경기도",
+        "경기도 용인시",
+        "경기도 수원시",
+        "경기도 성남시",
+        "경기도 고양시",
+        "경기도 화성시",
+        "경기도 안양시",
+        "강원특별자치도",
+        "충청북도",
+        "충청남도",
+        "전북특별자치도",
+        "전라남도",
+        "경상북도",
+        "경상남도",
+        "제주특별자치도"
+    ]
+
+    selected_region = request.values.get("region", "").strip()
+    error_message = None
+
+    if selected_region in ["전국", "전체", "전국 기준"]:
+        selected_region = ""
+
     try:
-        result = calculate_today_safety_score()
+        result = calculate_today_safety_score(
+            region_name=selected_region
+        )
 
         safety_result = {
+            "selected_region": result.get("selected_region", selected_region),
             "safety_score": result.get("safety_score", 0),
             "risk_score": result.get("risk_score", 0),
             "safety_level": result.get("safety_level", "정보 없음"),
-            "alert_risk_score": result.get("alert_risk_score", 0),
-            "weather_warning_risk_score": result.get("weather_warning_risk_score", 0),
-            "living_weather_risk_score": result.get("living_weather_risk_score", 0),
+            "alert_risk_score": result.get("alert_risk_score", result.get("alert_score", 0)),
+            "weather_warning_risk_score": result.get("weather_warning_risk_score", result.get("weather_score", 0)),
+            "living_weather_risk_score": result.get("living_weather_risk_score", result.get("living_score", 0)),
             "main_risk_types": result.get("main_risk_types", []),
-            "recommended_actions": result.get("recommended_actions", []),
-            "natural_alert_count": result.get("natural_alert_count", 0),
-            "high_risk_alert_count": result.get("high_risk_alert_count", 0),
-            "weather_warning_count": result.get("weather_warning_count", 0),
-            "living_weather_count": result.get("living_weather_count", 0)
+            "recommended_actions": result.get("recommended_actions", result.get("recommendations", [])),
+            "natural_alert_count": result.get("natural_alert_count", result.get("alert_detail", {}).get("natural_alert_count", 0)),
+            "high_risk_alert_count": result.get("high_risk_alert_count", result.get("alert_detail", {}).get("high_risk_alert_count", 0)),
+            "weather_warning_count": result.get("weather_warning_count", result.get("weather_detail", {}).get("weather_warning_count", 0)),
+            "living_weather_count": result.get("living_weather_count", result.get("living_detail", {}).get("living_weather_count", 0))
         }
 
     except Exception as e:
         print(f"[안전지수 오류] {e}")
+        error_message = str(e)
 
         safety_result = {
+            "selected_region": selected_region,
             "safety_score": 0,
             "risk_score": 0,
             "safety_level": "계산 실패",
@@ -355,9 +521,11 @@ def safety():
 
     return render_template(
         "safety.html",
-        safety_result=safety_result
+        safety_result=safety_result,
+        selected_region=selected_region,
+        region_options=region_options,
+        error_message=error_message
     )
-
 
 
 # 맞춤형 대피소 추천 화면
@@ -365,13 +533,13 @@ def safety():
 @app.route("/shelters", methods=["GET", "POST"])
 def shelters():
     """
-    사용자 위치 기반 대피소 추천 화면.
+    맞춤형 대피소 추천 화면.
 
     GET:
     - 처음 접속 시 추천 계산을 하지 않고 입력 화면만 보여준다.
 
     POST:
-    - 사용자가 추천 버튼을 눌렀을 때만 대피소 추천을 계산한다.
+    - 현재 위치 또는 주소 검색으로 전달된 좌표를 기준으로 대피소를 추천한다.
     """
 
     user_location = get_default_user_location()
@@ -385,12 +553,17 @@ def shelters():
     error_message = None
     has_searched = False
 
+    search_mode = "default"
+    user_address = ""
+
     if request.method == "GET":
         return render_template(
             "shelters.html",
             user_lat=user_lat,
             user_lon=user_lon,
             user_region=user_region,
+            user_address=user_address,
+            search_mode=search_mode,
             selected_disaster_type=selected_disaster_type,
             shelters=shelters_result,
             error_message=error_message,
@@ -400,23 +573,37 @@ def shelters():
     has_searched = True
 
     try:
-        user_lat = float(request.form.get("lat", user_lat))
-        user_lon = float(request.form.get("lon", user_lon))
-        user_region = request.form.get("region", user_region).strip()
+        lat_value = (request.form.get("lat") or "").strip()
+        lon_value = (request.form.get("lon") or "").strip()
 
-        selected_disaster_type = request.form.get("disaster_type", "").strip()
+        if lat_value == "" or lon_value == "":
+            raise ValueError("위치 좌표가 비어 있습니다.")
+
+        user_lat = float(lat_value)
+        user_lon = float(lon_value)
+
+        user_region = (request.form.get("region") or user_region).strip()
+        user_address = (request.form.get("user_address") or "").strip()
+        search_mode = (request.form.get("search_mode") or "default").strip()
+
+        selected_disaster_type = (request.form.get("disaster_type") or "").strip()
 
         if selected_disaster_type == "":
             selected_disaster_type = None
 
+        if user_address != "":
+            user_region = user_address
+
     except Exception:
-        error_message = "위도와 경도 값을 올바르게 입력해주세요."
+        error_message = "위치 정보를 가져오지 못했습니다. 현재 위치를 허용하거나 주소를 다시 선택해주세요."
 
         return render_template(
             "shelters.html",
             user_lat=user_lat,
             user_lon=user_lon,
             user_region=user_region,
+            user_address=user_address,
+            search_mode=search_mode,
             selected_disaster_type=selected_disaster_type,
             shelters=shelters_result,
             error_message=error_message,
@@ -445,12 +632,13 @@ def shelters():
         user_lat=user_lat,
         user_lon=user_lon,
         user_region=user_region,
+        user_address=user_address,
+        search_mode=search_mode,
         selected_disaster_type=selected_disaster_type,
         shelters=shelters_result,
         error_message=error_message,
         has_searched=has_searched
     )
-
 
 
 # 행동요령 RAG 검색 화면
@@ -497,7 +685,6 @@ def guide():
     )
 
 
-
 # 가족 안심 공유 문구 화면
 
 @app.route("/share", methods=["GET", "POST"])
@@ -509,13 +696,17 @@ def share():
     - 처음 접속 시 자동 생성하지 않는다.
 
     POST:
-    - 사용자가 생성 버튼을 눌렀을 때만 공유 문구를 생성한다.
+    - 현재 위치 또는 주소 검색으로 전달된 좌표가 있으면 그 위치 기준으로 대피소를 다시 추천한다.
+    - 선택한 위치명(user_region)을 기준으로 자연재난문자도 필터링한다.
     """
 
     user_location = get_default_user_location()
 
     user_status = "안전"
     user_region = user_location["region"]
+    user_lat = ""
+    user_lon = ""
+    search_mode = "manual"
     tone = "normal"
 
     share_message = None
@@ -528,6 +719,9 @@ def share():
             "share.html",
             user_status=user_status,
             user_region=user_region,
+            user_lat=user_lat,
+            user_lon=user_lon,
+            search_mode=search_mode,
             tone=tone,
             share_message=share_message,
             short_share_message=short_share_message,
@@ -539,6 +733,9 @@ def share():
 
     user_status = request.form.get("user_status", "안전").strip()
     user_region = request.form.get("user_region", user_region).strip()
+    user_lat = request.form.get("lat", "").strip()
+    user_lon = request.form.get("lon", "").strip()
+    search_mode = request.form.get("search_mode", "manual").strip()
     tone = request.form.get("tone", "normal").strip()
 
     if user_status == "":
@@ -547,19 +744,34 @@ def share():
     if user_region == "":
         user_region = user_location["region"]
 
+    recommended_df = None
+
     try:
+        # 현재 위치/주소 검색으로 좌표가 들어온 경우, 공유 문구 생성 전에 대피소를 그 위치 기준으로 다시 계산한다.
+        if user_lat != "" and user_lon != "":
+            recommended_df = recommend_shelters(
+                user_lat=float(user_lat),
+                user_lon=float(user_lon),
+                user_region=user_region,
+                disaster_type=None,
+                top_n=3,
+                max_distance_km=10
+            )
+
         share_message = generate_share_message(
             user_status=user_status,
             user_region=user_region,
             include_shelter=True,
-            tone=tone
+            tone=tone,
+            recommended_df=recommended_df
         )
 
         short_share_message = generate_share_message(
             user_status=user_status,
             user_region=user_region,
             include_shelter=True,
-            tone="short"
+            tone="short",
+            recommended_df=recommended_df
         )
 
     except Exception as e:
@@ -570,13 +782,15 @@ def share():
         "share.html",
         user_status=user_status,
         user_region=user_region,
+        user_lat=user_lat,
+        user_lon=user_lon,
+        search_mode=search_mode,
         tone=tone,
         share_message=share_message,
         short_share_message=short_share_message,
         error_message=error_message,
         has_generated=has_generated
     )
-
 
 
 # CSV 결과 확인용 화면
@@ -598,12 +812,13 @@ def data_shelters():
         user_lat=user_location["lat"],
         user_lon=user_location["lon"],
         user_region=user_location["region"],
+        user_address=user_location["region"],
+        search_mode="csv",
         selected_disaster_type=None,
         shelters=shelters_result,
         error_message=None,
         has_searched=True
     )
-
 
 
 # 긴급재난문자 자동 업데이트 경로
@@ -615,9 +830,6 @@ def update_alerts():
 
     사용 예:
     /update-alerts?key=설정한비밀키
-
-    외부 스케줄러가 이 주소를 5분마다 호출하면
-    최신 긴급재난문자를 수집하고 AI 분석 CSV를 갱신할 수 있다.
     """
 
     secret_key = os.environ.get("UPDATE_SECRET_KEY")
@@ -658,7 +870,6 @@ def update_alerts():
 
 # 상태 확인용 경로
 
-
 @app.route("/health")
 def health():
     """
@@ -670,9 +881,7 @@ def health():
     }
 
 
-
 # 서버 실행
-
 
 if __name__ == "__main__":
     app.run(
