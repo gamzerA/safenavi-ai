@@ -367,6 +367,26 @@ def get_shelter_match_score(shelter_type, disaster_type):
             return 15
         return 5
 
+    # 산불: 산림 인접 옥외시설보다 학교·공공·실내 수용시설을 우선한다.
+    if disaster_type == "산불":
+        if "실내" in shelter_type or "수용" in shelter_type:
+            return 30
+        if "공공" in shelter_type or "학교" in shelter_type or "시설" in shelter_type:
+            return 26
+        if "옥외" in shelter_type or "공터" in shelter_type:
+            return 8
+        return 14
+
+    # 화재: 발생 건물과 분리된 공공시설·학교·옥외 대피공간을 고려한다.
+    if disaster_type == "화재":
+        if "학교" in shelter_type or "공공" in shelter_type or "시설" in shelter_type:
+            return 28
+        if "옥외" in shelter_type or "공터" in shelter_type:
+            return 24
+        if "실내" in shelter_type or "수용" in shelter_type:
+            return 20
+        return 14
+
     # 호우/침수
     if disaster_type == "호우/침수":
         if "옥외" in shelter_type:
@@ -511,6 +531,20 @@ def make_recommend_reason(row, disaster_type, has_local_alert=False, user_region
             f"비상 상황에 대비해 현재 위치에서 가까운 대피소를 안내합니다. "
             f"{name}은 현재 위치에서 약 {distance:.2f}km 떨어져 있으며, "
             f"주소는 {address}, 대피소 유형은 {shelter_type}입니다."
+        )
+
+    if disaster_type == "산불":
+        return (
+            f"현재 산불 관련 위험이 확인되어 산림 인접 옥외시설보다 공공시설과 실내 수용시설을 우선 고려했습니다. "
+            f"{name}은 현재 위치에서 약 {distance:.2f}km 떨어져 있으며, "
+            f"주소는 {address}, 대피소 유형은 {shelter_type}입니다. 현장 대피명령이 있으면 지정 장소를 우선 따르세요."
+        )
+
+    if disaster_type == "화재":
+        return (
+            f"현재 화재 관련 위험이 확인되어 발생지와 분리된 공공시설 또는 안전한 대피공간을 우선 고려했습니다. "
+            f"{name}은 현재 위치에서 약 {distance:.2f}km 떨어져 있으며, "
+            f"주소는 {address}, 대피소 유형은 {shelter_type}입니다. 소방·현장 통제 안내를 우선 따르세요."
         )
 
     if disaster_type == "호우/침수":

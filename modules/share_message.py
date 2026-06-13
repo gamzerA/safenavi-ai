@@ -139,13 +139,19 @@ def filter_natural_alerts_by_region(alerts_df, user_region=None):
     if alerts_df.empty:
         return pd.DataFrame()
 
-    if "is_natural_disaster" not in alerts_df.columns:
-        return pd.DataFrame()
+    mask = pd.Series(False, index=alerts_df.index)
 
-    natural_df = alerts_df[
-        (alerts_df["is_natural_disaster"] == True)
-        | (alerts_df["is_natural_disaster"].astype(str).str.lower() == "true")
-    ].copy()
+    if "is_relevant_disaster" in alerts_df.columns:
+        mask = mask | alerts_df["is_relevant_disaster"].astype(str).str.lower().isin(["true", "1", "yes", "y", "t"])
+
+    if "is_natural_disaster" in alerts_df.columns:
+        mask = mask | alerts_df["is_natural_disaster"].astype(str).str.lower().isin(["true", "1", "yes", "y", "t"])
+
+    type_col = next((c for c in ["ai_disaster_type", "disaster_type"] if c in alerts_df.columns), None)
+    if type_col:
+        mask = mask | alerts_df[type_col].fillna("").astype(str).isin(["화재", "산불"])
+
+    natural_df = alerts_df[mask].copy()
 
     if natural_df.empty:
         return pd.DataFrame()
@@ -174,7 +180,7 @@ def filter_natural_alerts_by_region(alerts_df, user_region=None):
 
 def get_latest_main_disaster_info(alerts_df, user_region=None):
     """
-    AI 분석된 재난문자에서 사용자 지역 기준 주요 자연재난 정보를 가져온다.
+    AI 분석된 재난문자에서 사용자 지역 기준 주요 재난 정보를 가져온다.
     사용자 지역에 해당하는 자연재난 문자가 없으면 기본값을 반환한다.
     """
 
@@ -183,7 +189,7 @@ def get_latest_main_disaster_info(alerts_df, user_region=None):
         "main_disaster_type": "주변 직접 재난문자 없음",
         "risk_level": "낮음",
         "region": user_region if user_region else "사용자 위치 주변",
-        "easy_summary": "현재 사용자 지역과 직접 관련된 자연재난 문자는 확인되지 않았습니다."
+        "easy_summary": "현재 사용자 지역과 직접 관련된 재난문자는 확인되지 않았습니다."
     }
 
     natural_df = filter_natural_alerts_by_region(
@@ -278,9 +284,15 @@ def make_action_sentence(disaster_type, has_local_alert=True):
     """
 
     if not has_local_alert:
-        return "현재 사용자 지역과 직접 관련된 자연재난 문자는 없지만, 주변 기상특보와 안전 안내를 계속 확인할 예정입니다."
+        return "현재 사용자 지역과 직접 관련된 재난문자는 없지만, 주변 기상특보와 안전 안내를 계속 확인할 예정입니다."
 
     disaster_type = str(disaster_type)
+
+    if disaster_type == "산불":
+        return "산림과 연기 발생 지역에서 벗어나 지자체 대피 안내와 지정 대피장소를 확인할 예정입니다."
+
+    if disaster_type == "화재":
+        return "연기와 불길이 있는 방향을 피하고 비상계단·비상구를 이용해 안전한 곳으로 이동할 예정입니다."
 
     if disaster_type == "호우/침수":
         return "하천변, 지하차도, 저지대 이동은 피하고 안전한 곳에 머무를 예정입니다."
@@ -387,7 +399,7 @@ def generate_share_message(
         if has_local_alert:
             first_line = f"나 {user_status}해요. 현재 {region}에 {disaster_type} 위험 알림이 있어 확인했습니다."
         else:
-            first_line = f"나 {user_status}해요. 현재 {user_region} 주변에 직접 관련된 자연재난 문자는 확인되지 않았습니다."
+            first_line = f"나 {user_status}해요. 현재 {user_region} 주변에 직접 관련된 재난문자는 확인되지 않았습니다."
 
         if include_shelter and shelter_info["name"] != "추천 대피소 없음":
             message = (
@@ -421,7 +433,7 @@ def generate_share_message(
         message_lines.append(f"재난문자 요약: {easy_summary}")
     else:
         message_lines.append(
-            f"현재 {user_region} 주변에 직접 관련된 자연재난 문자는 확인되지 않았습니다."
+            f"현재 {user_region} 주변에 직접 관련된 재난문자는 확인되지 않았습니다."
         )
         message_lines.append("다만 주변 상황 확인을 위해 가까운 대피소와 안전 정보를 확인했습니다.")
         message_lines.append("")

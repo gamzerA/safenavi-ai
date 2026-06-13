@@ -2,76 +2,97 @@
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>오늘의 안전지수 | SafeNavi</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
 </head>
 <body>
 
 <header class="top-header">
-    <div class="logo">SafeNavi</div>
-    <nav>
+    <a class="logo" href="/">SafeNavi</a>
+    <nav aria-label="주요 메뉴">
         <a href="/">홈</a>
-        <a href="/safety">안전지수</a>
+        <a href="/safety" aria-current="page">안전지수</a>
         <a href="/shelters">대피소 추천</a>
         <a href="/guide">행동요령 AI</a>
         <a href="/share">안심 공유</a>
     </nav>
 </header>
 
-<main class="container">
+<main class="container safety-page">
 
-    <section class="page-title">
+    <section class="page-title safety-page-title">
         <p class="badge">Today Safety Index</p>
         <h1>오늘의 안전지수</h1>
         <p>
-            긴급재난문자, 기상특보, 생활기상지수 데이터를 종합하여
-            선택한 지역의 현재 위험도를 계산합니다.
+            지역을 직접 검색하거나 현재 위치를 사용해 해당 지역의 긴급재난문자,
+            기상특보, 생활기상지수를 확인할 수 있습니다.
         </p>
     </section>
 
-    <section class="content-card safety-region-card">
+    <section class="safety-location-card" aria-labelledby="locationSearchTitle">
         <div class="safety-region-header">
-            <div>
-                <p class="section-kicker">Region Filter</p>
-                <h2>지역별 안전지수 확인</h2>
-                <p>
-                    전국 기준으로 보거나, 시·도/시·군·구를 선택해서 해당 지역 중심의 재난문자와 위험 정보를 확인할 수 있습니다.
+            <p class="section-kicker">Location Search</p>
+            <h2 id="locationSearchTitle">어느 지역의 안전지수를 확인할까요?</h2>
+            <p>
+                주소 검색과 현재 위치 조회 중 하나를 선택하세요.
+                확인된 행정구역을 기준으로 지역 관련 데이터만 분석합니다.
+            </p>
+        </div>
+
+        <div class="safety-search-options">
+            <div class="safety-search-box">
+                <label for="safetyAddress">지역 또는 주소 검색</label>
+
+                <div class="safety-address-row">
+                    <input
+                        id="safetyAddress"
+                        type="text"
+                        value="{{ selected_address or selected_region or '' }}"
+                        placeholder="예: 경기도 용인시 처인구"
+                        autocomplete="street-address"
+                    >
+                    <button
+                        type="button"
+                        class="btn primary"
+                        id="searchRegionButton"
+                    >
+                        지역 검색
+                    </button>
+                </div>
+
+                <p class="small-text">
+                    입력한 주소는 Kakao 주소 검색을 통해 행정구역으로 변환됩니다.
                 </p>
+            </div>
+
+            <div class="safety-current-box">
+                <div>
+                    <label>내 위치로 확인</label>
+                    <p>
+                        브라우저 위치 권한을 허용하면 현재 좌표를 행정구역으로 변환해
+                        안전점수를 계산합니다.
+                    </p>
+                </div>
+
+                <button
+                    type="button"
+                    class="btn secondary"
+                    id="currentLocationButton"
+                >
+                    현재 위치 안전점수
+                </button>
             </div>
         </div>
 
-        <form method="get" action="/safety" class="safety-region-form">
-            <div class="safety-region-field">
-                <label>지역 선택 또는 직접 입력</label>
-                <input
-                    type="text"
-                    name="region"
-                    list="regionOptions"
-                    value="{{ selected_region }}"
-                    placeholder="예: 경기도 용인시, 서울특별시, 처인구"
-                >
+        <div id="locationStatus" class="location-status" aria-live="polite"></div>
 
-                <datalist id="regionOptions">
-                    <option value="">전국 기준</option>
-                    {% for region in region_options %}
-                        <option value="{{ region }}">{{ region }}</option>
-                    {% endfor %}
-                </datalist>
-            </div>
+        <a href="/safety?mode=all" class="safety-national-link">
+            전국 기준으로 보기
+        </a>
 
-            <div class="form-button">
-                <button type="submit" class="btn primary">
-                    안전지수 확인
-                </button>
-
-                <a href="/safety" class="btn secondary">
-                    전국 기준
-                </a>
-            </div>
-        </form>
-
-        <p class="small-text">
-            현재 분석 기준:
+        <div class="safety-current-region">
+            <span>현재 분석 기준</span>
             <strong>
                 {% if safety_result.selected_region %}
                     {{ safety_result.selected_region }}
@@ -79,13 +100,19 @@
                     전국
                 {% endif %}
             </strong>
-        </p>
+
+            {% if search_mode == "current" %}
+                <em>현재 위치 조회</em>
+            {% elif search_mode == "region" and safety_result.selected_region %}
+                <em>지역 검색 조회</em>
+            {% else %}
+                <em>전체 데이터 조회</em>
+            {% endif %}
+        </div>
     </section>
 
     {% if error_message %}
-        <div class="alert-box">
-            {{ error_message }}
-        </div>
+        <div class="alert-box" role="alert">{{ error_message }}</div>
     {% endif %}
 
     <section class="safety-hero-card">
@@ -99,64 +126,59 @@
             </p>
 
             <div class="safety-score-number">
-                {{ safety_result.safety_score }}
+                {{ safety_result.safety_score | default(0, true) }}
                 <span>점</span>
             </div>
 
             <div class="safety-level-badge">
-                {{ safety_result.safety_level }}
+                {{ safety_result.safety_level | default('정보 없음', true) }}
             </div>
 
             <p class="safety-summary">
-                위험 점수는 {{ safety_result.risk_score }}점입니다.
-                점수가 높을수록 안전한 상태에 가깝습니다.
-                {% if safety_result.selected_region %}
-                    현재 결과는 선택 지역과 관련된 데이터를 우선 반영했습니다.
-                {% else %}
-                    현재 결과는 전체 수집 데이터를 기준으로 계산했습니다.
-                {% endif %}
+                총 위험점수는 {{ safety_result.risk_score | default(0, true) }}점입니다.
+                안전점수는 100점에서 위험점수를 차감해 계산하며,
+                점수가 높을수록 상대적으로 안전한 상태입니다.
             </p>
         </div>
 
         <div class="safety-score-side">
             <div class="risk-meter">
                 <div class="risk-meter-top">
-                    <span>위험도</span>
-                    <strong>{{ safety_result.risk_score }}점</strong>
+                    <span>총 위험점수</span>
+                    <strong>{{ safety_result.risk_score | default(0, true) }}점</strong>
                 </div>
 
-                <div class="risk-bar">
+                <div class="risk-bar" aria-hidden="true">
                     <div
                         class="risk-bar-fill"
-                        style="width: {{ safety_result.risk_score }}%;"
+                        style="width: {{ safety_result.risk_score | default(0, true) }}%;"
                     ></div>
                 </div>
 
                 <p>
-                    위험도는 재난문자, 기상특보, 생활기상지수의 위험 점수를 합산하여 계산합니다.
-                    선택 지역이 있을 경우 지역명이 포함된 데이터만 우선 반영합니다.
+                    재난문자, 기상특보, 생활기상지수 위험점수를 합산한 값입니다.
                 </p>
             </div>
         </div>
     </section>
 
-    <section class="safety-stat-grid">
+    <section class="safety-stat-grid" aria-label="위험점수 구성">
         <div class="safety-stat-card">
             <span>재난문자 위험</span>
-            <strong>{{ safety_result.alert_risk_score }}점</strong>
-            <p>선택 지역 관련 자연재난 문자와 위험도 분석 결과</p>
+            <strong>{{ safety_result.alert_risk_score | default(0, true) }}점</strong>
+            <p>자연재난·화재·산불 문자와 고위험 분석 결과를 반영합니다.</p>
         </div>
 
         <div class="safety-stat-card">
             <span>기상특보 위험</span>
-            <strong>{{ safety_result.weather_warning_risk_score }}점</strong>
-            <p>호우, 태풍, 대설 등 기상특보 반영</p>
+            <strong>{{ safety_result.weather_warning_risk_score | default(0, true) }}점</strong>
+            <p>경보, 주의보, 예비특보 등급을 반영합니다.</p>
         </div>
 
         <div class="safety-stat-card">
             <span>생활기상 위험</span>
-            <strong>{{ safety_result.living_weather_risk_score }}점</strong>
-            <p>폭염, 한파 등 생활기상지수 반영</p>
+            <strong>{{ safety_result.living_weather_risk_score | default(0, true) }}점</strong>
+            <p>수집된 생활기상지수의 위험 구간을 반영합니다.</p>
         </div>
     </section>
 
@@ -176,9 +198,7 @@
                     {% endfor %}
                 </div>
             {% else %}
-                <p class="empty-text">
-                    현재 주요 위험 유형이 확인되지 않았습니다.
-                </p>
+                <p class="empty-text">현재 주요 위험 유형이 확인되지 않았습니다.</p>
             {% endif %}
         </div>
 
@@ -204,6 +224,71 @@
         </div>
     </section>
 
+    <section class="local-alert-section" aria-labelledby="localAlertsTitle">
+        <div class="local-alert-header">
+            <div>
+                <p class="section-kicker">Local Emergency Alerts</p>
+                <h2 id="localAlertsTitle">해당 지역 긴급재난문자</h2>
+                <p>
+                    아래 문자는 현재 안전점수 계산에 반영된 지역 관련
+                    자연재난·화재·산불 문자 원문입니다.
+                </p>
+            </div>
+
+            <span class="local-alert-count">
+                {{ safety_result.local_alerts | default([], true) | length }}건 표시
+            </span>
+        </div>
+
+        {% if safety_result.local_alerts %}
+            <div class="local-alert-list">
+                {% for alert in safety_result.local_alerts %}
+                    <article class="local-alert-card">
+                        <div class="local-alert-card-top">
+                            <div class="local-alert-tags">
+                                <span class="local-alert-type">
+                                    {{ alert.disaster_type | default('재난', true) }}
+                                </span>
+                                <span class="local-alert-risk">
+                                    위험도 {{ alert.risk_level | default('정보 없음', true) }}
+                                </span>
+                            </div>
+
+                            {% if alert.created_at %}
+                                <time datetime="{{ alert.created_at }}">{{ alert.created_at }}</time>
+                            {% endif %}
+                        </div>
+
+                        {% if alert.region %}
+                            <p class="local-alert-meta">
+                                <span>{{ alert.region }}</span>
+                            </p>
+                        {% endif %}
+
+                        <p class="local-alert-message">
+                            {{ alert.message | default('재난문자 원문을 불러오지 못했습니다.', true) }}
+                        </p>
+
+                        {% if alert.easy_summary %}
+                            <div class="local-alert-analysis">
+                                <strong>SafeNavi 분석</strong>
+                                <p>{{ alert.easy_summary }}</p>
+                            </div>
+                        {% endif %}
+                    </article>
+                {% endfor %}
+            </div>
+        {% else %}
+            <div class="empty-local-alert">
+                <strong>지역 관련 재난문자가 없습니다.</strong>
+                <p>
+                    현재 선택한 지역과 직접 관련된 자연재난·화재·산불 문자가 확인되지 않았습니다.
+                    기상특보와 생활기상지수 등 수집된 다른 정보를 함께 사용해 점수를 계산했습니다.
+                </p>
+            </div>
+        {% endif %}
+    </section>
+
     <section class="content-card safety-data-card">
         <div class="section-heading-row">
             <div>
@@ -212,34 +297,221 @@
             </div>
         </div>
 
-        <div class="data-summary-grid">
+        <div class="data-summary-grid safety-data-summary-grid">
             <div>
-                <span>자연재난 문자</span>
-                <strong>{{ safety_result.natural_alert_count }}건</strong>
+                <span>반영 재난문자</span>
+                <strong>{{ safety_result.relevant_alert_count | default(0, true) }}건</strong>
             </div>
-
             <div>
                 <span>고위험 문자</span>
-                <strong>{{ safety_result.high_risk_alert_count }}건</strong>
+                <strong>{{ safety_result.high_risk_alert_count | default(0, true) }}건</strong>
             </div>
-
+            <div>
+                <span>화재 문자</span>
+                <strong>{{ safety_result.fire_alert_count | default(0, true) }}건</strong>
+            </div>
+            <div>
+                <span>산불 문자</span>
+                <strong>{{ safety_result.wildfire_alert_count | default(0, true) }}건</strong>
+            </div>
             <div>
                 <span>기상특보</span>
-                <strong>{{ safety_result.weather_warning_count }}건</strong>
+                <strong>{{ safety_result.weather_warning_count | default(0, true) }}건</strong>
             </div>
-
             <div>
                 <span>생활기상지수</span>
-                <strong>{{ safety_result.living_weather_count }}건</strong>
+                <strong>{{ safety_result.living_weather_count | default(0, true) }}건</strong>
             </div>
         </div>
     </section>
 
+    <section class="score-method-section">
+        <details class="score-method" open>
+            <summary>안전점수 산출 기준과 공식</summary>
+
+            <div class="score-method-content">
+                <p class="method-model-name">
+                    {{ safety_result.score_formula.model_name | default('규칙 기반 가중합 위험평가 모델', true) }}
+                </p>
+
+                <div class="score-formula-main">
+                    <p>
+                        <strong>총 위험점수</strong><br>
+                        {{ safety_result.score_formula.risk_formula | default('재난문자 위험점수 + 기상특보 위험점수 + 생활기상지수 위험점수', true) }}
+                    </p>
+                    <p>
+                        <strong>최종 안전점수</strong><br>
+                        {{ safety_result.score_formula.safety_formula | default('100 - 총 위험점수', true) }}
+                    </p>
+                </div>
+
+                <div class="score-formula-grid">
+                    <article class="score-formula-card">
+                        <h3>긴급재난문자 · 최대 45점</h3>
+                        <p>
+                            {{ safety_result.score_formula.alert_formula | default('min(반영 재난문자 수 × 5 + 고위험 문자 수 × 3, 45)', true) }}
+                        </p>
+                    </article>
+
+                    <article class="score-formula-card">
+                        <h3>기상특보 · 최대 30점</h3>
+                        <p>
+                            {{ safety_result.score_formula.weather_formula | default('경보 25점, 주의보 15점, 예비특보·정보 8점의 합계', true) }}
+                        </p>
+                    </article>
+
+                    <article class="score-formula-card">
+                        <h3>생활기상지수 · 최대 25점</h3>
+                        <p>
+                            {{ safety_result.score_formula.living_formula | default('지수 값 80 이상 10점, 50 이상 6점, 30 이상 3점의 합계', true) }}
+                        </p>
+                    </article>
+                </div>
+
+                <div class="score-basis-box">
+                    <h3>산출 근거</h3>
+                    <p>
+                        {{ safety_result.score_formula.basis | default('긴급재난문자는 특정 지역의 실제 상황을 직접 전달하므로 가장 높은 최대 배점을 두고, 기상특보는 공식 주의보·경보 단계를 반영하며, 생활기상지수는 일상생활 위험을 보완하는 지표로 사용합니다.', true) }}
+                    </p>
+                </div>
+
+                <p class="score-notice">
+                    ※ {{ safety_result.score_formula.notice | default('현재 세부 배점은 서비스 초기 설계를 위한 설명 가능한 휴리스틱 기준이며, 정부의 공식 재난등급이나 피해예측 결과를 대체하지 않습니다. 실제 재난 상황에서는 행정안전부·기상청·지자체의 공식 안내를 우선 확인하세요.', true) }}
+                </p>
+            </div>
+        </details>
+    </section>
+
 </main>
 
-<footer>
-    SafeNavi Capstone Design Project
-</footer>
+<footer>SafeNavi Capstone Design Project</footer>
+
+<script>
+(function () {
+    const addressInput = document.getElementById("safetyAddress");
+    const searchButton = document.getElementById("searchRegionButton");
+    const currentButton = document.getElementById("currentLocationButton");
+    const statusBox = document.getElementById("locationStatus");
+
+    function setStatus(message, type) {
+        statusBox.textContent = message || "";
+        statusBox.className = "location-status";
+
+        if (type) {
+            statusBox.classList.add(type);
+        }
+    }
+
+    function moveToSafety(params) {
+        const query = new URLSearchParams(params);
+        window.location.href = "/safety?" + query.toString();
+    }
+
+    async function searchRegion() {
+        const address = addressInput.value.trim();
+
+        if (!address) {
+            setStatus("검색할 지역이나 주소를 입력해주세요.", "error");
+            addressInput.focus();
+            return;
+        }
+
+        searchButton.disabled = true;
+        setStatus("주소와 행정구역을 확인하고 있습니다.", "loading");
+
+        try {
+            const response = await fetch(
+                "/api/geocode?address=" + encodeURIComponent(address)
+            );
+            const data = await response.json();
+
+            if (!response.ok || data.status !== "success") {
+                throw new Error(data.message || "주소를 찾지 못했습니다.");
+            }
+
+            moveToSafety({
+                region: data.region || address,
+                address: data.address || address,
+                lat: data.lat || "",
+                lon: data.lon || "",
+                mode: "region"
+            });
+        } catch (error) {
+            setStatus(error.message, "error");
+            searchButton.disabled = false;
+        }
+    }
+
+    function useCurrentLocation() {
+        if (!navigator.geolocation) {
+            setStatus("현재 브라우저에서는 위치 기능을 사용할 수 없습니다.", "error");
+            return;
+        }
+
+        currentButton.disabled = true;
+        setStatus("현재 위치를 확인하고 있습니다.", "loading");
+
+        navigator.geolocation.getCurrentPosition(
+            async function (position) {
+                const lat = position.coords.latitude;
+                const lon = position.coords.longitude;
+
+                try {
+                    const response = await fetch(
+                        "/api/reverse-geocode?lat=" + encodeURIComponent(lat) +
+                        "&lon=" + encodeURIComponent(lon)
+                    );
+                    const data = await response.json();
+
+                    if (!response.ok || data.status !== "success") {
+                        throw new Error(data.message || "현재 위치 주소를 찾지 못했습니다.");
+                    }
+
+                    moveToSafety({
+                        region: data.region || data.address,
+                        address: data.address || "현재 위치",
+                        lat: lat,
+                        lon: lon,
+                        mode: "current"
+                    });
+                } catch (error) {
+                    setStatus(error.message, "error");
+                    currentButton.disabled = false;
+                }
+            },
+            function (error) {
+                let message = "현재 위치를 가져오지 못했습니다.";
+
+                if (error.code === error.PERMISSION_DENIED) {
+                    message = "위치 권한이 거부되었습니다. 브라우저 설정에서 위치 권한을 허용해주세요.";
+                } else if (error.code === error.POSITION_UNAVAILABLE) {
+                    message = "현재 위치 정보를 사용할 수 없습니다.";
+                } else if (error.code === error.TIMEOUT) {
+                    message = "현재 위치 확인 시간이 초과되었습니다.";
+                }
+
+                setStatus(message, "error");
+                currentButton.disabled = false;
+            },
+            {
+                enableHighAccuracy: true,
+                timeout: 10000,
+                maximumAge: 60000
+            }
+        );
+    }
+
+    searchButton.addEventListener("click", searchRegion);
+    currentButton.addEventListener("click", useCurrentLocation);
+
+    addressInput.addEventListener("keydown", function (event) {
+        if (event.key === "Enter") {
+            event.preventDefault();
+            searchRegion();
+        }
+    });
+})();
+</script>
 
 </body>
 </html>

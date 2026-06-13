@@ -59,6 +59,34 @@ def dataframe_to_dict_list(df):
     return df.to_dict(orient="records")
 
 
+def safe_int(value, default=0):
+    """
+    None, 빈 문자열, NaN, 숫자 문자열을 안전한 정수로 변환한다.
+    화면에서 값이 없을 때 빈칸 대신 0을 표시하기 위해 사용한다.
+    """
+    try:
+        if value is None:
+            return default
+
+        if pd.isna(value):
+            return default
+
+        text = str(value).strip()
+
+        if text == "":
+            return default
+
+        return int(float(text))
+
+    except (TypeError, ValueError):
+        return default
+
+
+def safe_list(value):
+    """None 또는 비목록 값을 안전한 목록으로 변환한다."""
+    return value if isinstance(value, list) else []
+
+
 def get_default_user_location():
     """
     테스트용 기본 사용자 위치.
@@ -69,6 +97,29 @@ def get_default_user_location():
         "lon": 127.1776,
         "region": "경기도 용인시"
     }
+
+
+def build_kakao_region(address_data):
+    """
+    Kakao 주소 응답에서 안전지수 지역 필터에 사용할 행정구역명을 만든다.
+
+    예:
+    경기도 + 용인시 처인구 + 역북동
+    -> 경기도 용인시 처인구 역북동
+    """
+
+    if not isinstance(address_data, dict):
+        return ""
+
+    region_parts = [
+        str(address_data.get("region_1depth_name", "")).strip(),
+        str(address_data.get("region_2depth_name", "")).strip(),
+        str(address_data.get("region_3depth_name", "")).strip()
+    ]
+
+    return " ".join(part for part in region_parts if part)
+
+
 
 
 # 주소 변환 API
@@ -118,10 +169,18 @@ def geocode_address():
             }, 404
 
         first = documents[0]
+        address_info = first.get("address") or {}
+        road_address_info = first.get("road_address") or {}
+
+        region_name = build_kakao_region(address_info)
+
+        if not region_name:
+            region_name = build_kakao_region(road_address_info)
 
         return {
             "status": "success",
-            "address": address,
+            "address": first.get("address_name", address),
+            "region": region_name or address,
             "lat": first.get("y"),
             "lon": first.get("x")
         }
@@ -197,11 +256,17 @@ def reverse_geocode():
         if address_name == "":
             address_name = "현재 위치"
 
+        region_name = build_kakao_region(jibun_address or {})
+
+        if not region_name:
+            region_name = build_kakao_region(road_address or {})
+
         return {
             "status": "success",
             "lat": lat,
             "lon": lon,
-            "address": address_name
+            "address": address_name,
+            "region": region_name or address_name
         }
 
     except Exception as e:
@@ -415,6 +480,13 @@ def normalize_rag_result(rag_result, question=""):
         "disaster_type": disaster_type,
         "situation_type": situation_type,
         "answer": answer,
+        "summary": rag_result.get("summary", answer),
+        "immediate_actions": rag_result.get("immediate_actions", []) or [],
+        "prohibited_actions": rag_result.get("prohibited_actions", []) or [],
+        "detail": rag_result.get("detail", ""),
+        "best_title": rag_result.get("best_title", ""),
+        "best_score": rag_result.get("best_score", 0),
+        "is_low_confidence": bool(rag_result.get("is_low_confidence", False)),
         "references": normalized_references
     }
 
@@ -440,7 +512,13 @@ def index():
 def safety():
     """
     오늘의 안전지수 결과 화면.
-    지역 선택값이 있으면 해당 지역 기준으로 안전지수를 계산한다.
+
+    지원 방식:
+    1. 사용자가 지역명 또는 주소를 검색
+    2. 브라우저 현재 위치를 주소로 변환하여 조회
+    3. 전국 기준 조회
+
+    실제 안전점수 계산에는 최종적으로 확인된 행정구역명(region)을 사용한다.
     """
 
     region_options = [
@@ -470,30 +548,100 @@ def safety():
     ]
 
     selected_region = request.values.get("region", "").strip()
+    selected_address = request.values.get("address", "").strip()
+    search_mode = request.values.get("mode", "region").strip()
+    latitude = request.values.get("lat", "").strip()
+    longitude = request.values.get("lon", "").strip()
     error_message = None
 
     if selected_region in ["전국", "전체", "전국 기준"]:
         selected_region = ""
+        selected_address = ""
+        search_mode = "all"
 
     try:
         result = calculate_today_safety_score(
             region_name=selected_region
         )
 
+        alert_detail = result.get("alert_detail", {}) or {}
+        weather_detail = result.get("weather_detail", {}) or {}
+        living_detail = result.get("living_detail", {}) or {}
+
         safety_result = {
             "selected_region": result.get("selected_region", selected_region),
-            "safety_score": result.get("safety_score", 0),
-            "risk_score": result.get("risk_score", 0),
-            "safety_level": result.get("safety_level", "정보 없음"),
-            "alert_risk_score": result.get("alert_risk_score", result.get("alert_score", 0)),
-            "weather_warning_risk_score": result.get("weather_warning_risk_score", result.get("weather_score", 0)),
-            "living_weather_risk_score": result.get("living_weather_risk_score", result.get("living_score", 0)),
-            "main_risk_types": result.get("main_risk_types", []),
-            "recommended_actions": result.get("recommended_actions", result.get("recommendations", [])),
-            "natural_alert_count": result.get("natural_alert_count", result.get("alert_detail", {}).get("natural_alert_count", 0)),
-            "high_risk_alert_count": result.get("high_risk_alert_count", result.get("alert_detail", {}).get("high_risk_alert_count", 0)),
-            "weather_warning_count": result.get("weather_warning_count", result.get("weather_detail", {}).get("weather_warning_count", 0)),
-            "living_weather_count": result.get("living_weather_count", result.get("living_detail", {}).get("living_weather_count", 0))
+            "safety_score": safe_int(result.get("safety_score", 0)),
+            "risk_score": safe_int(result.get("risk_score", 0)),
+            "safety_level": result.get("safety_level", "정보 없음") or "정보 없음",
+            "alert_risk_score": safe_int(
+                result.get("alert_risk_score", result.get("alert_score", 0))
+            ),
+            "weather_warning_risk_score": safe_int(
+                result.get(
+                    "weather_warning_risk_score",
+                    result.get("weather_score", 0)
+                )
+            ),
+            "living_weather_risk_score": safe_int(
+                result.get(
+                    "living_weather_risk_score",
+                    result.get("living_score", 0)
+                )
+            ),
+            "main_risk_types": safe_list(result.get("main_risk_types", [])),
+            "recommended_actions": safe_list(
+                result.get(
+                    "recommended_actions",
+                    result.get("recommendations", [])
+                )
+            ),
+            "relevant_alert_count": safe_int(
+                result.get(
+                    "relevant_alert_count",
+                    alert_detail.get(
+                        "relevant_alert_count",
+                        result.get("natural_alert_count", 0)
+                    )
+                )
+            ),
+            "natural_alert_count": safe_int(
+                result.get(
+                    "natural_alert_count",
+                    alert_detail.get("natural_alert_count", 0)
+                )
+            ),
+            "high_risk_alert_count": safe_int(
+                result.get(
+                    "high_risk_alert_count",
+                    alert_detail.get("high_risk_alert_count", 0)
+                )
+            ),
+            "fire_alert_count": safe_int(
+                result.get(
+                    "fire_alert_count",
+                    alert_detail.get("fire_alert_count", 0)
+                )
+            ),
+            "wildfire_alert_count": safe_int(
+                result.get(
+                    "wildfire_alert_count",
+                    alert_detail.get("wildfire_alert_count", 0)
+                )
+            ),
+            "weather_warning_count": safe_int(
+                result.get(
+                    "weather_warning_count",
+                    weather_detail.get("weather_warning_count", 0)
+                )
+            ),
+            "living_weather_count": safe_int(
+                result.get(
+                    "living_weather_count",
+                    living_detail.get("living_weather_count", 0)
+                )
+            ),
+            "local_alerts": safe_list(result.get("local_alerts", [])),
+            "score_formula": result.get("score_formula", {}) or {}
         }
 
     except Exception as e:
@@ -513,16 +661,25 @@ def safety():
                 "안전지수 계산 중 오류가 발생했습니다.",
                 "data/processed 폴더에 필요한 CSV 파일이 있는지 확인하세요."
             ],
+            "relevant_alert_count": 0,
             "natural_alert_count": 0,
             "high_risk_alert_count": 0,
+            "fire_alert_count": 0,
+            "wildfire_alert_count": 0,
             "weather_warning_count": 0,
-            "living_weather_count": 0
+            "living_weather_count": 0,
+            "local_alerts": [],
+            "score_formula": {}
         }
 
     return render_template(
         "safety.html",
         safety_result=safety_result,
         selected_region=selected_region,
+        selected_address=selected_address,
+        search_mode=search_mode,
+        latitude=latitude,
+        longitude=longitude,
         region_options=region_options,
         error_message=error_message
     )

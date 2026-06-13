@@ -210,70 +210,89 @@ def is_true_value(value):
     return text in ["true", "1", "yes", "y", "t"]
 
 
+def get_relevant_alerts(df):
+    """
+    안전점수에 반영할 재난문자를 반환한다.
+
+    우선 is_relevant_disaster를 사용하고, 이전 CSV와의 호환을 위해
+    is_natural_disaster=True 또는 재난유형이 화재·산불인 행도 포함한다.
+    """
+    if df.empty:
+        return df.copy()
+
+    mask = pd.Series(False, index=df.index)
+
+    if "is_relevant_disaster" in df.columns:
+        mask = mask | df["is_relevant_disaster"].apply(is_true_value)
+
+    if "is_natural_disaster" in df.columns:
+        mask = mask | df["is_natural_disaster"].apply(is_true_value)
+
+    type_col = next(
+        (col for col in ["ai_disaster_type", "disaster_type"] if col in df.columns),
+        None
+    )
+    if type_col:
+        mask = mask | df[type_col].fillna("").astype(str).isin(["화재", "산불"])
+
+    return df[mask].copy()
+
+
 def score_from_disaster_alerts(df):
     """
-    AI 분석된 긴급재난문자 데이터에서 위험 점수를 계산한다.
+    AI 분석된 긴급재난문자 위험점수를 계산한다.
 
-    점수 기준:
-    - 자연재난 문자 1건당 5점
+    자연재난과 주민 대피에 직접 영향을 주는 화재·산불을 포함한다.
+    - 반영 대상 문자 1건당 5점
     - 위험도 '높음' 1건당 추가 3점
     - 최대 45점
     """
+    relevant_df = get_relevant_alerts(df)
 
-    if df.empty:
+    if relevant_df.empty:
         return 0, {
+            "relevant_alert_count": 0,
             "natural_alert_count": 0,
+            "fire_alert_count": 0,
+            "wildfire_alert_count": 0,
             "high_risk_alert_count": 0,
             "main_disaster_types": []
         }
 
-    if "is_natural_disaster" not in df.columns:
-        return 0, {
-            "natural_alert_count": 0,
-            "high_risk_alert_count": 0,
-            "main_disaster_types": []
-        }
+    type_col = next(
+        (col for col in ["ai_disaster_type", "disaster_type"] if col in relevant_df.columns),
+        None
+    )
+    risk_col = next(
+        (col for col in ["ai_risk_level", "risk_level"] if col in relevant_df.columns),
+        None
+    )
 
-    natural_df = df[
-        df["is_natural_disaster"].apply(is_true_value)
-    ].copy()
-
-    natural_count = len(natural_df)
-
+    relevant_count = len(relevant_df)
     high_risk_count = 0
-    if "ai_risk_level" in natural_df.columns:
-        high_risk_count = len(
-            natural_df[
-                natural_df["ai_risk_level"].fillna("").astype(str).str.contains("높음", na=False)
-            ]
-        )
+    if risk_col:
+        high_risk_count = relevant_df[risk_col].fillna("").astype(str).str.contains("높음", na=False).sum()
 
-    score = natural_count * 5 + high_risk_count * 3
-    score = min(score, 45)
-
+    fire_count = 0
+    wildfire_count = 0
     main_types = []
+    if type_col:
+        types = relevant_df[type_col].fillna("").astype(str)
+        fire_count = int((types == "화재").sum())
+        wildfire_count = int((types == "산불").sum())
+        main_types = types.replace("", pd.NA).dropna().value_counts().head(3).index.tolist()
 
-    if not natural_df.empty and "ai_disaster_type" in natural_df.columns:
-        main_types = (
-            natural_df["ai_disaster_type"]
-            .dropna()
-            .astype(str)
-            .replace("", pd.NA)
-            .dropna()
-            .value_counts()
-            .head(3)
-            .index
-            .tolist()
-        )
+    score = min(relevant_count * 5 + int(high_risk_count) * 3, 45)
 
-    detail = {
-        "natural_alert_count": natural_count,
-        "high_risk_alert_count": high_risk_count,
+    return score, {
+        "relevant_alert_count": relevant_count,
+        # 기존 app.py/템플릿 호환용 이름
+        "natural_alert_count": relevant_count,
+        "fire_alert_count": fire_count,
+        "wildfire_alert_count": wildfire_count,
+        "high_risk_alert_count": int(high_risk_count),
         "main_disaster_types": main_types
     }
-
-    return score, detail
-
 
 def score_from_weather_warnings(df):
     """
@@ -499,6 +518,20 @@ def make_recommendations(level, main_risk_types):
             "건물 외벽, 간판, 유리창 주변을 피하세요."
         ])
 
+    if "산불" in main_risk_types:
+        recommendations.extend([
+            "산림과 야산, 연기 발생 지역에서 즉시 벗어나세요.",
+            "산불 진행 방향과 바람을 확인하고 지자체 대피 안내를 따르세요.",
+            "차량보다 지정 대피장소나 안전한 실내시설을 우선 확인하세요."
+        ])
+
+    if "화재" in main_risk_types:
+        recommendations.extend([
+            "연기와 불길이 있는 방향을 피하고 낮은 자세로 이동하세요.",
+            "엘리베이터 대신 비상계단과 비상구를 이용하세요.",
+            "119와 현장 통제요원의 안내를 우선 따르세요."
+        ])
+
     if not recommendations:
         if level == "위험":
             recommendations.append("현재 위험 수준이 높으니 외출을 자제하고 공식 안내를 확인하세요.")
@@ -513,6 +546,270 @@ def make_recommendations(level, main_risk_types):
             unique_recommendations.append(item)
 
     return unique_recommendations[:5]
+
+
+
+def first_existing_row_value(row, columns, default=""):
+    """
+    여러 후보 컬럼 중 값이 존재하는 첫 번째 값을 반환한다.
+    재난문자 CSV의 컬럼명이 수집 단계에 따라 달라도 화면에 표시할 수 있게 한다.
+    """
+
+    for col in columns:
+        if col not in row.index:
+            continue
+
+        value = row.get(col, default)
+
+        if value is None or pd.isna(value):
+            continue
+
+        text = str(value).strip()
+
+        if text and text.lower() != "nan":
+            return text
+
+    return default
+
+
+def format_alert_datetime(value):
+    """
+    재난문자 발송 시각을 화면 표시용 문자열로 정리한다.
+    변환할 수 없으면 원본 문자열을 반환한다.
+    """
+
+    if value is None or pd.isna(value):
+        return ""
+
+    text = str(value).strip()
+
+    if not text or text.lower() == "nan":
+        return ""
+
+    parsed = pd.to_datetime(text, errors="coerce")
+
+    if pd.isna(parsed):
+        return text
+
+    return parsed.strftime("%Y-%m-%d %H:%M")
+
+
+def find_alert_message_value(row):
+    """
+    재난문자 원문 컬럼명이 데이터 수집 방식에 따라 달라도
+    실제 문자 본문을 최대한 찾아 반환한다.
+
+    1. 알려진 메시지 컬럼명을 먼저 확인한다.
+    2. 컬럼명에 msg/message/content/문자/내용이 포함된 컬럼을 확인한다.
+    3. 그래도 찾지 못하면 메타데이터가 아닌 긴 문자열을 본문 후보로 사용한다.
+    """
+
+    known_candidates = [
+        "message", "msg", "MSG_CN", "msg_cn", "msgCn",
+        "message_content", "message_text", "msg_content",
+        "content", "contents", "text", "body",
+        "DSSTR_MSG_CN", "dsstr_msg_cn", "DISASTER_MSG",
+        "재난문자", "문자내용", "내용"
+    ]
+
+    value = first_existing_row_value(row, known_candidates, default="")
+    if value:
+        return value
+
+    keyword_candidates = []
+    for col in row.index:
+        normalized_col = str(col).lower().replace("_", "")
+        if any(keyword in normalized_col for keyword in [
+            "message", "msg", "content", "text", "body", "문자", "내용"
+        ]):
+            keyword_candidates.append(col)
+
+    value = first_existing_row_value(row, keyword_candidates, default="")
+    if value:
+        return value
+
+    excluded_columns = {
+        "is_natural_disaster", "ai_disaster_type", "disaster_type",
+        "ai_risk_level", "risk_level", "ai_region", "region",
+        "RCPTN_RGN_NM", "rcptn_rgn_nm", "created_at", "date",
+        "id", "sn", "serial_no", "source", "lat", "lon",
+        "latitude", "longitude"
+    }
+
+    fallback_values = []
+
+    for col in row.index:
+        if str(col) in excluded_columns:
+            continue
+
+        raw_value = row.get(col, "")
+        if raw_value is None or pd.isna(raw_value):
+            continue
+
+        text = str(raw_value).strip()
+        if not text or text.lower() == "nan":
+            continue
+
+        # 실제 재난문자는 보통 비교적 긴 문장이다.
+        if len(text) >= 20:
+            fallback_values.append(text)
+
+    if not fallback_values:
+        return ""
+
+    return max(fallback_values, key=len)
+
+
+def build_local_alerts(alerts_df, limit=5):
+    """
+    선택 지역으로 필터링된 재난문자 중 안전점수에 반영되는
+    안전점수 반영 재난문자 원문을 최신순으로 정리한다.
+
+    동일한 문자 원문은 한 번만 표시한다.
+    """
+
+    if alerts_df.empty:
+        return []
+
+    natural_df = get_relevant_alerts(alerts_df)
+
+    if natural_df.empty:
+        return []
+
+    datetime_candidates = [
+        "created_at", "CREATED_AT", "crt_dt", "CRT_DT",
+        "send_time", "sent_at", "reg_date", "date",
+        "CREAT_DT", "create_date", "createdAt"
+    ]
+
+    sort_col = next(
+        (candidate for candidate in datetime_candidates if candidate in natural_df.columns),
+        None
+    )
+
+    if sort_col:
+        natural_df["_alert_sort_time"] = pd.to_datetime(
+            natural_df[sort_col],
+            errors="coerce"
+        )
+        natural_df = natural_df.sort_values(
+            by="_alert_sort_time",
+            ascending=False,
+            na_position="last"
+        )
+
+    region_candidates = [
+        "ai_region", "region", "RCPTN_RGN_NM", "rcptn_rgn_nm",
+        "area", "location", "AREA_NM", "region_name"
+    ]
+    disaster_candidates = [
+        "ai_disaster_type", "disaster_type", "type"
+    ]
+    risk_candidates = [
+        "ai_risk_level", "risk_level"
+    ]
+    summary_candidates = [
+        "easy_summary", "summary", "ai_summary"
+    ]
+
+    seen_messages = set()
+    local_alerts = []
+
+    for _, row in natural_df.iterrows():
+        message = find_alert_message_value(row)
+
+        if not message:
+            # 점수에는 포함됐지만 원문 컬럼을 찾지 못한 경우도
+            # 화면에서 완전히 사라지지 않도록 안내 문구를 표시한다.
+            message = "재난문자 원문 컬럼을 확인하지 못했습니다. 데이터 컬럼 구성을 확인해주세요."
+
+        normalized_message = re.sub(r"\s+", " ", str(message)).strip()
+
+        if normalized_message in seen_messages:
+            continue
+
+        seen_messages.add(normalized_message)
+
+        created_at = first_existing_row_value(
+            row,
+            datetime_candidates,
+            default=""
+        )
+
+        local_alerts.append(
+            {
+                "message": str(message),
+                "created_at": format_alert_datetime(created_at),
+                "region": first_existing_row_value(
+                    row,
+                    region_candidates,
+                    default="지역 정보 없음"
+                ),
+                "disaster_type": first_existing_row_value(
+                    row,
+                    disaster_candidates,
+                    default="재난"
+                ),
+                "risk_level": first_existing_row_value(
+                    row,
+                    risk_candidates,
+                    default="주의"
+                ),
+                "easy_summary": first_existing_row_value(
+                    row,
+                    summary_candidates,
+                    default=""
+                )
+            }
+        )
+
+        if len(local_alerts) >= limit:
+            break
+
+    return local_alerts
+
+
+def get_score_formula_info():
+    """
+    화면 하단에 표시할 현재 안전점수 산출 기준을 반환한다.
+
+    현재 모델은 정부기관의 단일 표준 산식이 아니라,
+    공식 데이터의 위험 단계와 정보의 직접성을 이용한
+    규칙 기반 가중합 휴리스틱 모델이다.
+    """
+
+    return {
+        "model_name": "규칙 기반 가중합 위험평가 모델",
+        "risk_formula": (
+            "총 위험점수 = 재난문자 위험점수 + "
+            "기상특보 위험점수 + 생활기상지수 위험점수"
+        ),
+        "safety_formula": "안전점수 = 100 - 총 위험점수",
+        "alert_formula": (
+            "재난문자 위험점수 = "
+            "min(자연재난 문자 수 × 5 + 고위험 문자 수 × 3, 45)"
+        ),
+        "weather_formula": (
+            "경보 25점, 주의보 15점, 예비특보·정보 8점의 합계 "
+            "(최대 30점)"
+        ),
+        "living_formula": (
+            "생활기상지수 값 80 이상 10점, 50 이상 6점, "
+            "30 이상 3점의 합계(최대 25점)"
+        ),
+        "basis": (
+            "긴급재난문자는 특정 지역의 실제 상황을 직접 전달하므로 "
+            "가장 높은 최대 배점을 두고, 기상특보는 공식 주의보·경보 "
+            "단계를 반영하며, 생활기상지수는 일상생활 위험을 보완하는 "
+            "지표로 사용합니다."
+        ),
+        "notice": (
+            "현재 세부 배점은 서비스 초기 설계를 위한 설명 가능한 "
+            "휴리스틱 기준이며 정부의 공식 재난등급이나 피해예측 결과를 "
+            "대체하지 않습니다."
+        )
+    }
+
 
 
 def calculate_today_safety_score(region_name=None):
@@ -544,6 +841,9 @@ def calculate_today_safety_score(region_name=None):
         alerts_df = filter_df_by_region(alerts_df, selected_region)
         weather_df = filter_df_by_region(weather_df, selected_region)
         living_df = filter_df_by_region(living_df, selected_region)
+
+    # 화면에 표시할 해당 지역 자연재난 문자 원문
+    local_alerts = build_local_alerts(alerts_df, limit=5)
 
     alert_score, alert_detail = score_from_disaster_alerts(alerts_df)
     weather_score, weather_detail = score_from_weather_warnings(weather_df)
@@ -591,10 +891,16 @@ def calculate_today_safety_score(region_name=None):
         "weather_score": weather_score,
         "living_score": living_score,
 
+        "relevant_alert_count": alert_detail.get("relevant_alert_count", alert_detail["natural_alert_count"]),
         "natural_alert_count": alert_detail["natural_alert_count"],
+        "fire_alert_count": alert_detail.get("fire_alert_count", 0),
+        "wildfire_alert_count": alert_detail.get("wildfire_alert_count", 0),
         "high_risk_alert_count": alert_detail["high_risk_alert_count"],
         "weather_warning_count": weather_detail["weather_warning_count"],
         "living_weather_count": living_detail["living_weather_count"],
+
+        "local_alerts": local_alerts,
+        "score_formula": get_score_formula_info(),
 
         "alert_detail": alert_detail,
         "weather_detail": weather_detail,
