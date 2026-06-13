@@ -163,8 +163,7 @@
                         <h2>추천 대피소 {{ shelters | length }}곳</h2>
 
                         <p class="small-text">
-                            모바일에서는 카드를 좌우로 밀어
-                            2·3위를 확인할 수 있습니다.
+                            화면 크기에 따라 카드가 3열·2열·가로 슬라이드로 자동 배치됩니다.
                         </p>
                     </div>
                 </div>
@@ -212,7 +211,7 @@
                                         km
                                     </span>
 
-                                    <span>
+                                    <span class="shelter-type-fact">
                                         {{
                                             shelter.shelter_type
                                             | default('대피시설', true)
@@ -378,6 +377,7 @@
     SafeNavi Capstone Design Project
 </footer>
 
+<script src="https://t1.daumcdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js"></script>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
 <script>
@@ -490,53 +490,87 @@
 
     document
         .getElementById("addressSearchBtn")
-        .addEventListener("click", async () => {
-            const address = document
-                .getElementById("addressInput")
-                .value
-                .trim();
-
-            if (!address) {
-                setStatus("주소를 입력하세요.", true);
+        .addEventListener("click", () => {
+            if (
+                typeof window.daum === "undefined"
+                || typeof window.daum.Postcode !== "function"
+            ) {
+                setStatus(
+                    "카카오 주소검색 모듈을 불러오지 못했습니다. 잠시 후 다시 시도해주세요.",
+                    true
+                );
                 return;
             }
 
-            setStatus("주소를 찾는 중입니다...");
+            new daum.Postcode({
+                oncomplete: async function (data) {
+                    const selectedAddress = (
+                        data.roadAddress
+                        || data.jibunAddress
+                        || data.address
+                        || ""
+                    ).trim();
 
-            try {
-                const response = await fetch(
-                    "/api/geocode?address="
-                    + encodeURIComponent(address)
-                );
+                    if (!selectedAddress) {
+                        setStatus("선택한 주소를 확인할 수 없습니다.", true);
+                        return;
+                    }
 
-                const data = await response.json();
+                    document.getElementById("addressInput").value = selectedAddress;
+                    setStatus("선택한 주소의 좌표를 확인하는 중입니다...");
 
-                if (
-                    !response.ok
-                    || data.status !== "success"
-                ) {
-                    throw new Error(
-                        data.message
-                        || "주소를 찾지 못했습니다."
-                    );
+                    try {
+                        const response = await fetch(
+                            "/api/geocode?address="
+                            + encodeURIComponent(selectedAddress)
+                        );
+
+                        const result = await response.json();
+
+                        if (
+                            !response.ok
+                            || result.status !== "success"
+                        ) {
+                            throw new Error(
+                                result.message
+                                || "주소 좌표를 찾지 못했습니다."
+                            );
+                        }
+
+                        latInput.value = result.lat;
+                        lonInput.value = result.lon;
+
+                        regionInput.value = (
+                            result.region
+                            || ((data.sido || "") + " " + (data.sigungu || ""))
+                            || selectedAddress
+                        ).trim();
+
+                        userAddressInput.value = (
+                            result.address
+                            || selectedAddress
+                        );
+
+                        searchModeInput.value = "address";
+
+                        setStatus(
+                            "검색 위치를 확인했습니다: "
+                            + selectedAddress
+                        );
+                    } catch (error) {
+                        setStatus(
+                            error.message
+                            || "주소 좌표 변환 중 오류가 발생했습니다.",
+                            true
+                        );
+                    }
+                },
+                onclose: function (state) {
+                    if (state === "FORCE_CLOSE") {
+                        setStatus("주소 검색이 취소되었습니다.");
+                    }
                 }
-
-                latInput.value = data.lat;
-                lonInput.value = data.lon;
-                regionInput.value = data.region || address;
-                userAddressInput.value = (
-                    data.address
-                    || address
-                );
-                searchModeInput.value = "address";
-
-                setStatus(
-                    "검색 위치: "
-                    + (data.address || address)
-                );
-            } catch (error) {
-                setStatus(error.message, true);
-            }
+            }).open();
         });
 
     document
@@ -593,7 +627,7 @@
                         ).value = address;
 
                         setStatus(
-                            "현재 위치: " + address
+                            "현재 위치를 확인했습니다: " + address
                         );
                     } catch (error) {
                         regionInput.value = "현재 위치";

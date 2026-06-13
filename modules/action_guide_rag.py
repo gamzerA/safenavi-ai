@@ -711,12 +711,98 @@ def build_direct_answer_intro(question, detected_disaster_type):
     return ""
 
 
+
+MIN_RAG_SCORE = 35
+
+
+def unique_text_items(items, limit=5):
+    """빈 값과 중복 문장을 제거하고 최대 개수만 반환한다."""
+    result = []
+    for item in items:
+        text = re.sub(r"\s+", " ", str(item or "")).strip(" -•\t\n")
+        if text and text not in result:
+            result.append(text)
+        if len(result) >= limit:
+            break
+    return result
+
+
+def split_guide_sentences(text):
+    """행동요령 본문을 짧은 문장 목록으로 분리한다."""
+    cleaned = clean_answer_text(text, max_length=1200)
+    if not cleaned:
+        return []
+    parts = re.split(r"(?<=[.!?다요])\s+|[•●▪■]|\n+", cleaned)
+    return unique_text_items(parts, limit=12)
+
+
+def get_structured_actions(disaster_type, intents, situation_type, guide_text=""):
+    """재난 유형과 질문 의도에 맞는 즉시 행동·금지 행동을 반환한다."""
+    presets = {
+        "호우/침수": {
+            "summary": "침수 위험지역에 진입하지 말고 높은 곳이나 안전한 실내로 이동하세요.",
+            "do": ["지하차도와 침수도로에 진입하지 않습니다.", "하천변·저지대에서 즉시 벗어납니다.", "높은 곳이나 지정 대피소로 이동합니다."],
+            "dont": ["물이 얕아 보여도 차량이나 도보로 통과하지 않습니다.", "하천 수위를 확인하려고 접근하지 않습니다."]},
+        "태풍": {
+            "summary": "외출을 줄이고 창문과 낙하물 위험이 없는 실내에 머무르세요.",
+            "do": ["창문과 유리문에서 떨어져 머무릅니다.", "간판·가로수·해안가를 피합니다.", "공식 특보와 대피 안내를 확인합니다."],
+            "dont": ["강풍 중 외출하거나 해안가에 접근하지 않습니다.", "창문을 열어 고정하려고 하지 않습니다."]},
+        "폭염": {
+            "summary": "한낮 야외활동을 중단하고 시원한 장소에서 수분을 보충하세요.",
+            "do": ["물을 자주 마십니다.", "무더위쉼터나 냉방 가능한 실내로 이동합니다.", "어지럼증이 있으면 즉시 휴식하고 도움을 요청합니다."],
+            "dont": ["한낮에 운동하거나 장시간 야외에 머무르지 않습니다.", "밀폐된 차량 안에 사람이나 동물을 두지 않습니다."]},
+        "한파": {
+            "summary": "보온을 유지하고 빙판길과 장시간 외출을 피하세요.",
+            "do": ["여러 겹의 옷과 방한용품으로 체온을 유지합니다.", "수도계량기와 배관의 동파를 예방합니다.", "빙판길에서는 천천히 이동합니다."],
+            "dont": ["장시간 야외에 머무르지 않습니다.", "결빙된 도로에서 급제동하지 않습니다."]},
+        "대설": {
+            "summary": "불필요한 이동을 줄이고 도로 통제와 교통정보를 확인하세요.",
+            "do": ["외출 전 도로와 대중교통 상황을 확인합니다.", "보행 시 미끄럼 방지 신발을 착용합니다.", "차량의 월동장비를 점검합니다."],
+            "dont": ["눈길에서 과속하거나 급제동하지 않습니다.", "붕괴 우려가 있는 지붕 아래에 머무르지 않습니다."]},
+        "지진": {
+            "summary": "머리를 보호하고 흔들림이 멈춘 뒤 계단으로 넓은 공간에 이동하세요.",
+            "do": ["책상 아래에서 머리와 몸을 보호합니다.", "흔들림이 멈추면 가스와 전기를 확인합니다.", "계단을 이용해 넓은 공터나 지정 대피장소로 이동합니다."],
+            "dont": ["엘리베이터를 이용하지 않습니다.", "건물 외벽·유리창·간판 주변에 머무르지 않습니다."]},
+        "지진해일": {
+            "summary": "해안과 저지대에서 즉시 벗어나 높은 곳으로 이동하세요.",
+            "do": ["해안가를 즉시 이탈합니다.", "높은 지대나 지진해일 대피장소로 이동합니다.", "해제 안내 전까지 안전지역에 머무릅니다."],
+            "dont": ["파도를 확인하려고 해안으로 가지 않습니다.", "차량 정체가 예상되면 무리하게 운전하지 않습니다."]},
+        "산사태": {
+            "summary": "산비탈과 급경사지에서 벗어나 안전한 건물이나 대피소로 이동하세요.",
+            "do": ["산비탈·옹벽·급경사지에서 멀어집니다.", "토사 이동 방향의 옆쪽으로 신속히 대피합니다.", "지자체 대피 안내를 확인합니다."],
+            "dont": ["토사 유출 지역을 가로질러 이동하지 않습니다.", "위험지역으로 되돌아가지 않습니다."]},
+        "화재": {
+            "summary": "주변에 화재를 알리고 119에 신고한 뒤 계단과 비상구로 대피하세요.",
+            "do": ["큰 소리로 주변에 알리고 119에 신고합니다.", "코와 입을 가리고 낮은 자세로 이동합니다.", "계단과 비상구를 이용해 밖으로 대피합니다."],
+            "dont": ["엘리베이터를 이용하지 않습니다.", "불길이나 연기가 큰 곳에 다시 들어가지 않습니다."]},
+        "산불": {
+            "summary": "산림과 연기 진행 방향에서 벗어나 지자체가 안내한 안전지역으로 이동하세요.",
+            "do": ["산림·야산·연기 발생 지역에서 즉시 벗어납니다.", "바람과 연기의 진행 방향을 피해 이동합니다.", "지자체와 소방의 대피 명령을 따릅니다."],
+            "dont": ["산불을 촬영하거나 확인하려고 접근하지 않습니다.", "산길이나 좁은 도로로 무리하게 차량 이동하지 않습니다."]}
+    }
+    preset = presets.get(disaster_type, {
+        "summary": "공식 재난문자와 현장 안내를 확인하고 안전한 장소로 이동하세요.",
+        "do": ["현재 위치의 위험요인을 확인합니다.", "지자체와 현장 안내에 따라 이동합니다."],
+        "dont": ["통제구역에 진입하지 않습니다."]})
+    guide_sentences = split_guide_sentences(guide_text)
+    immediate = list(preset["do"])
+    prohibited = list(preset["dont"])
+    for sentence in guide_sentences:
+        if contains_any(sentence, ["하지", "금지", "피하", "자제", "접근하지", "이용하지"]):
+            prohibited.append(sentence)
+        elif contains_any(sentence, ["이동", "대피", "확인", "신고", "보호", "마시", "유지"]):
+            immediate.append(sentence)
+    return preset["summary"], unique_text_items(immediate, 5), unique_text_items(prohibited, 4)
+
+
 def generate_rag_answer(question, top_n=3):
-    """사용자 질문에 대해 행동요령 기반 답변을 생성한다."""
+    """사용자 질문에 대해 핵심 행동 중심의 구조화된 RAG 답변을 생성한다."""
     detected_disaster_type, situation_type, result_df = search_action_guides(
         question=question,
         top_n=top_n
     )
+    situation_text = situation_type_to_korean(situation_type)
+    intents = detect_question_intents(question)
 
     if result_df.empty:
         return {
@@ -724,58 +810,54 @@ def generate_rag_answer(question, top_n=3):
             "disaster_type": detected_disaster_type,
             "detected_disaster_type": detected_disaster_type,
             "situation_type": situation_type,
-            "situation_type_korean": situation_type_to_korean(situation_type),
+            "situation_type_korean": situation_text,
+            "is_low_confidence": True,
+            "summary": "질문과 정확히 일치하는 행동요령을 찾지 못했습니다.",
+            "immediate_actions": ["지자체 재난문자와 현장 안내를 우선 확인하세요."],
+            "prohibited_actions": [],
+            "detail": "공식 재난안전 안내를 확인하고 위험지역에는 접근하지 마세요.",
             "answer": "관련 행동요령을 찾지 못했습니다. 공식 재난안전 안내와 지자체 문자를 확인하세요.",
             "references": []
         }
 
     best_row = result_df.iloc[0]
-    best_title = best_row.get("title", "관련 행동요령")
-
+    best_score = int(best_row.get("rag_score", 0))
+    best_title = str(best_row.get("title", "관련 행동요령"))
     best_content = best_row.get("easy_content", "")
-
-    if pd.isna(best_content) or str(best_content).strip() == "":
+    if pd.isna(best_content) or not str(best_content).strip():
         best_content = best_row.get("content", "")
+    best_content = clean_answer_text(best_content, max_length=700)
 
-    best_content = clean_answer_text(best_content)
-
-    direct_intro = build_direct_answer_intro(
-        question=question,
-        detected_disaster_type=detected_disaster_type
+    summary, immediate_actions, prohibited_actions = get_structured_actions(
+        disaster_type=detected_disaster_type,
+        intents=intents,
+        situation_type=situation_type,
+        guide_text=best_content
     )
 
-    references = []
+    is_low_confidence = best_score < MIN_RAG_SCORE
+    if is_low_confidence:
+        summary = "질문과 완전히 일치하는 자료가 부족해 일반 안전수칙을 안내합니다."
+        immediate_actions = ["지자체 재난문자와 현장 안내를 우선 확인하세요."]
+        prohibited_actions = ["근거가 불확실한 정보만 믿고 위험지역에 접근하지 마세요."]
 
+    references = []
     for _, row in result_df.iterrows():
         rag_score = int(row.get("rag_score", 0))
+        references.append({
+            "guide_id": row.get("guide_id", ""),
+            "disaster_type": row.get("disaster_type", ""),
+            "title": row.get("title", ""),
+            "score": rag_score,
+            "rag_score": rag_score,
+            "matched_keywords": row.get("matched_keywords", "")
+        })
 
-        references.append(
-            {
-                "guide_id": row.get("guide_id", ""),
-                "disaster_type": row.get("disaster_type", ""),
-                "title": row.get("title", ""),
-                "score": rag_score,
-                "rag_score": rag_score,
-                "matched_keywords": row.get("matched_keywords", "")
-            }
-        )
-
-    situation_text = situation_type_to_korean(situation_type)
-
-    answer_parts = [
-        f"질문에서 '{detected_disaster_type}' 관련 '{situation_text}'으로 판단했습니다."
-    ]
-
-    if direct_intro:
-        answer_parts.append(direct_intro)
-
-    answer_parts.append(f"가장 관련 있는 행동요령은 '{best_title}'입니다.")
-
-    if best_content:
-        answer_parts.append(best_content)
-
-    answer_parts.append("추가로 지자체 재난문자, 기상특보, 현장 안내를 함께 확인하는 것이 좋습니다.")
-
+    answer_parts = [summary]
+    if immediate_actions:
+        answer_parts.append("즉시 해야 할 행동: " + " ".join(immediate_actions))
+    if prohibited_actions:
+        answer_parts.append("하지 말아야 할 행동: " + " ".join(prohibited_actions))
     answer = "\n\n".join(answer_parts)
 
     return {
@@ -784,10 +866,16 @@ def generate_rag_answer(question, top_n=3):
         "detected_disaster_type": detected_disaster_type,
         "situation_type": situation_type,
         "situation_type_korean": situation_text,
+        "is_low_confidence": is_low_confidence,
+        "best_score": best_score,
+        "summary": summary,
+        "immediate_actions": immediate_actions,
+        "prohibited_actions": prohibited_actions,
+        "detail": best_content,
+        "best_title": best_title,
         "answer": answer,
         "references": references
     }
-
 
 def print_rag_result(result):
     """RAG 결과를 터미널에 출력한다."""

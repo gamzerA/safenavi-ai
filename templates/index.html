@@ -2,16 +2,18 @@
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
-    <title>SafeNavi</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
-
-    <!-- Daum/Kakao 우편번호 검색 -->
-    <script src="https://t1.kakaocdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js"></script>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SafeNavi | 재난안전 길잡이</title>
+    <link
+        rel="stylesheet"
+        href="{{ url_for('static', filename='css/style.css') }}"
+    >
 </head>
-<body>
 
+<body>
 <header class="top-header">
-    <div class="logo">SafeNavi</div>
+    <a class="logo" href="/">SafeNavi</a>
+
     <nav>
         <a href="/">홈</a>
         <a href="/safety">안전지수</a>
@@ -21,188 +23,221 @@
     </nav>
 </header>
 
-<main class="container">
-
+<main class="container home-container">
     <section class="home-hero">
         <div class="hero-left">
-            <p class="badge">AI 기반 생활밀착형 재난 안전 안내 서비스</p>
+            <p class="badge">AI Disaster Safety Platform</p>
 
             <h1>
-                재난 상황을 이해하고<br>
-                가장 안전한 행동을 안내합니다.
+                재난정보를 이해하고,<br>
+                가장 가까운 안전을 찾습니다.
             </h1>
 
             <p class="hero-description">
-                SafeNavi는 긴급재난문자, 기상정보, 대피소 데이터를 분석하여
-                오늘의 안전지수, 맞춤형 대피소, 행동요령, 가족 안심 공유 문구를 제공합니다.
+                SafeNavi는 긴급재난문자, 기상정보, 공공 대피소 데이터와
+                국민행동요령을 결합해 지역별 안전지수와 맞춤형 대피소를
+                안내하는 재난안전 서비스입니다.
             </p>
 
             <div class="hero-buttons">
-                <a href="/safety" class="btn primary">오늘의 안전지수 확인</a>
-                <a href="/shelters" class="btn secondary">대피소 추천 받기</a>
+                <a class="btn primary" href="/safety">
+                    오늘의 안전지수 확인
+                </a>
+
+                <a class="btn secondary" href="/shelters">
+                    가까운 대피소 찾기
+                </a>
             </div>
         </div>
 
-        <div class="hero-right">
-            <div class="content-card location-card">
-                <h2>내 위치 기준 대피소 찾기</h2>
+        <aside class="content-card location-card home-status-card">
+            <p class="section-kicker">Quick Start</p>
+            <h2>현재 위치에서 시작하세요</h2>
 
-                <p>
-                    현재 위치를 허용하거나 원하는 주소를 검색하면,
-                    가까운 대피소 TOP 3를 바로 추천받을 수 있습니다.
-                </p>
+            <p>
+                주소 검색 또는 브라우저 현재 위치를 사용하면
+                해당 지역의 안전정보와 가까운 대피소를 확인할 수 있습니다.
+            </p>
 
-                <form method="post" action="/shelters" id="homeShelterForm">
-                    <input type="hidden" name="lat" id="homeLatInput">
-                    <input type="hidden" name="lon" id="homeLonInput">
-                    <input type="hidden" name="region" id="homeRegionInput">
-                    <input type="hidden" name="user_address" id="homeAddressInput">
-                    <input type="hidden" name="search_mode" id="homeSearchModeInput">
-                    <input type="hidden" name="disaster_type" value="">
-
-                    <div class="button-row">
-                        <button type="button" class="btn primary" onclick="findShelterByCurrentLocation()">
-                            현재 위치로 추천받기
-                        </button>
-
-                        <button type="button" class="btn secondary" onclick="findShelterByAddress()">
-                            주소 검색으로 추천받기
-                        </button>
-                    </div>
-                </form>
-
-                <p id="homeLocationStatus" class="small-text">
-                    위도와 경도는 화면에 표시하지 않고 대피소 거리 계산에만 사용됩니다.
-                </p>
+            <div class="home-location-summary">
+                <span>기본 안내 지역</span>
+                <strong>
+                    {{
+                        user_location.region
+                        if user_location
+                        else '경기도 용인시'
+                    }}
+                </strong>
             </div>
-        </div>
+
+            <a class="btn primary home-full-button" href="/shelters">
+                위치 선택하고 추천받기
+            </a>
+        </aside>
     </section>
 
-    <section class="home-card-grid">
-        <div class="feature-card">
+    <section class="home-card-grid" aria-label="SafeNavi 주요 기능">
+        <article class="feature-card home-feature-card">
+            <span class="home-feature-number">01</span>
             <h2>오늘의 안전지수</h2>
             <p>
-                재난문자, 기상특보, 생활기상지수를 종합하여 위험도를 계산합니다.
+                지역 관련 재난문자, 기상특보와 생활기상지수를 종합해
+                현재 위험요인과 권장 행동을 보여줍니다.
             </p>
-            <a href="/safety" class="card-link">확인하기 →</a>
-        </div>
+            <a class="card-link" href="/safety">안전지수 확인 →</a>
+        </article>
 
-        <div class="feature-card">
+        <article class="feature-card home-feature-card">
+            <span class="home-feature-number">02</span>
             <h2>맞춤형 대피소 추천</h2>
             <p>
-                현재 위치 또는 주소 검색을 기준으로 가까운 대피소 TOP 3를 추천합니다.
+                거리, 재난 적합도, 수용정보와 데이터 출처를 점수화해
+                가까운 대피소를 추천합니다.
             </p>
-            <a href="/shelters" class="card-link">추천받기 →</a>
-        </div>
+            <a class="card-link" href="/shelters">대피소 추천 →</a>
+        </article>
 
-        <div class="feature-card">
-            <h2>행동요령 RAG AI</h2>
+        <article class="feature-card home-feature-card">
+            <span class="home-feature-number">03</span>
+            <h2>행동요령 AI</h2>
             <p>
-                자연재난 행동요령 데이터를 기반으로 질문에 맞는 답변을 생성합니다.
+                국민행동요령 데이터를 검색해 즉시 해야 할 행동과
+                하지 말아야 할 행동을 구조화해 안내합니다.
             </p>
-            <a href="/guide" class="card-link">질문하기 →</a>
-        </div>
+            <a class="card-link" href="/guide">행동요령 질문 →</a>
+        </article>
 
-        <div class="feature-card">
+        <article class="feature-card home-feature-card">
+            <span class="home-feature-number">04</span>
             <h2>가족 안심 공유</h2>
             <p>
-                현재 상황과 위치 정보를 가족에게 보낼 문구로 자동 생성합니다.
+                현재 지역과 안전상태, 추천 대피소를 정리해
+                가족이나 지인에게 보낼 메시지를 생성합니다.
             </p>
-            <a href="/share" class="card-link">문구 만들기 →</a>
+            <a class="card-link" href="/share">안심 문구 생성 →</a>
+        </article>
+    </section>
+
+    <section class="trust-section">
+        <div class="trust-heading">
+            <p class="section-kicker">Why SafeNavi</p>
+            <h2>공공데이터와 설명 가능한 기준을 사용합니다</h2>
+            <p>
+                단순히 결과만 제시하지 않고, 어떤 데이터를 사용했는지와
+                추천점수가 어떤 요소로 구성됐는지를 함께 확인할 수 있도록
+                설계했습니다.
+            </p>
+        </div>
+
+        <div class="trust-grid">
+            <article class="trust-card">
+                <div class="trust-icon">01</div>
+                <h3>공공데이터 기반</h3>
+                <p>
+                    행정안전부 긴급재난문자, 대피소·수용시설,
+                    국민행동요령과 기상 데이터를 활용합니다.
+                </p>
+            </article>
+
+            <article class="trust-card">
+                <div class="trust-icon">02</div>
+                <h3>지역 맞춤 분석</h3>
+                <p>
+                    선택한 주소나 현재 위치와 관련된 재난정보를 우선
+                    필터링해 지역 중심 결과를 제공합니다.
+                </p>
+            </article>
+
+            <article class="trust-card">
+                <div class="trust-icon">03</div>
+                <h3>설명 가능한 추천</h3>
+                <p>
+                    거리, 재난 적합도, 수용정보와 출처 점수를 분리해
+                    추천 이유를 사용자가 확인할 수 있습니다.
+                </p>
+            </article>
+
+            <article class="trust-card">
+                <div class="trust-icon">04</div>
+                <h3>공식 안내 우선</h3>
+                <p>
+                    SafeNavi 결과는 참고정보이며, 실제 재난 시에는
+                    정부·지자체·소방기관의 안내를 우선합니다.
+                </p>
+            </article>
         </div>
     </section>
 
+    <section class="technology-section">
+        <div class="technology-inner">
+            <div>
+                <p class="section-kicker">Technology</p>
+                <h2>데이터, 위치정보와 AI를 하나로 연결했습니다</h2>
+                <p>
+                    재난문자 분류, 위험점수 계산, 위치 기반 대피소 추천,
+                    RAG 행동요령 검색과 가족 공유 기능을 하나의 흐름으로
+                    제공합니다.
+                </p>
+            </div>
+
+            <div class="technology-tags" aria-label="사용 기술">
+                <span>Flask</span>
+                <span>PostgreSQL</span>
+                <span>PostGIS</span>
+                <span>공공데이터 API</span>
+                <span>위치 기반 추천</span>
+                <span>RAG 행동요령</span>
+                <span>카카오 주소검색</span>
+                <span>OpenStreetMap</span>
+            </div>
+        </div>
+    </section>
+
+    <section class="home-process-section">
+        <div class="trust-heading">
+            <p class="section-kicker">How It Works</p>
+            <h2>SafeNavi 이용 흐름</h2>
+        </div>
+
+        <div class="home-process-grid">
+            <article>
+                <span>1</span>
+                <h3>위치 선택</h3>
+                <p>주소를 검색하거나 현재 위치를 확인합니다.</p>
+            </article>
+
+            <article>
+                <span>2</span>
+                <h3>지역 위험 분석</h3>
+                <p>재난문자와 기상정보를 지역 기준으로 분석합니다.</p>
+            </article>
+
+            <article>
+                <span>3</span>
+                <h3>대피소 추천</h3>
+                <p>거리와 재난 적합도를 계산해 추천 순위를 제공합니다.</p>
+            </article>
+
+            <article>
+                <span>4</span>
+                <h3>행동·공유</h3>
+                <p>행동요령을 확인하고 가족에게 안전상태를 공유합니다.</p>
+            </article>
+        </div>
+    </section>
+
+    <section class="service-notice-section">
+        <strong>서비스 이용 안내</strong>
+        <p>
+            SafeNavi의 안전점수와 추천 결과는 재난 상황 판단을 돕기 위한
+            참고정보입니다. 실제 위험 상황에서는 긴급재난문자, 현장 통제,
+            정부와 지자체의 공식 대피 안내를 따라주세요.
+        </p>
+    </section>
 </main>
 
 <footer>
     SafeNavi Capstone Design Project
 </footer>
-
-<script>
-    function submitHomeShelterForm(lat, lon, address, searchMode) {
-        document.getElementById("homeLatInput").value = lat;
-        document.getElementById("homeLonInput").value = lon;
-        document.getElementById("homeRegionInput").value = address;
-        document.getElementById("homeAddressInput").value = address;
-        document.getElementById("homeSearchModeInput").value = searchMode;
-
-        document.getElementById("homeShelterForm").submit();
-    }
-
-    function findShelterByCurrentLocation() {
-        const status = document.getElementById("homeLocationStatus");
-
-        if (!navigator.geolocation) {
-            status.innerText = "이 브라우저에서는 현재 위치 기능을 지원하지 않습니다.";
-            return;
-        }
-
-        status.innerText = "현재 위치를 가져오는 중입니다. 위치 권한을 허용해주세요.";
-
-        navigator.geolocation.getCurrentPosition(
-            function(position) {
-                const lat = position.coords.latitude.toFixed(6);
-                const lon = position.coords.longitude.toFixed(6);
-
-                fetch(`/api/reverse-geocode?lat=${lat}&lon=${lon}`)
-                    .then(response => response.json())
-                    .then(data => {
-                        const address = data.status === "success"
-                            ? data.address
-                            : "현재 위치";
-
-                        submitHomeShelterForm(lat, lon, address, "current");
-                    })
-                    .catch(function() {
-                        submitHomeShelterForm(lat, lon, "현재 위치", "current");
-                    });
-            },
-            function() {
-                status.innerText = "현재 위치를 가져오지 못했습니다. 주소 검색을 이용해주세요.";
-            },
-            {
-                enableHighAccuracy: true,
-                timeout: 10000,
-                maximumAge: 0
-            }
-        );
-    }
-
-    function findShelterByAddress() {
-        const status = document.getElementById("homeLocationStatus");
-
-        new daum.Postcode({
-            oncomplete: function(data) {
-                let address = data.roadAddress;
-
-                if (!address) {
-                    address = data.jibunAddress;
-                }
-
-                if (!address) {
-                    status.innerText = "주소를 선택하지 못했습니다. 다시 검색해주세요.";
-                    return;
-                }
-
-                status.innerText = "주소를 좌표로 변환하는 중입니다.";
-
-                fetch(`/api/geocode?address=${encodeURIComponent(address)}`)
-                    .then(response => response.json())
-                    .then(data => {
-                        if (data.status !== "success") {
-                            status.innerText = data.message || "주소 좌표 변환에 실패했습니다.";
-                            return;
-                        }
-
-                        submitHomeShelterForm(data.lat, data.lon, address, "address");
-                    })
-                    .catch(function() {
-                        status.innerText = "주소 좌표 변환 중 오류가 발생했습니다.";
-                    });
-            }
-        }).open();
-    }
-</script>
-
 </body>
 </html>

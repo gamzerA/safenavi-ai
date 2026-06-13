@@ -739,6 +739,9 @@ def shelters():
         user_lat = float(lat_value)
         user_lon = float(lon_value)
 
+        # user_region은 재난문자·지역 데이터 필터링용 행정구역명이다.
+        # user_address는 화면 표시와 길찾기 출발지용 상세 주소다.
+        # 두 값을 서로 덮어쓰지 않고 별도로 유지한다.
         user_region = (request.form.get("region") or user_region).strip()
         user_address = (request.form.get("user_address") or "").strip()
         search_mode = (request.form.get("search_mode") or "default").strip()
@@ -747,9 +750,6 @@ def shelters():
 
         if selected_disaster_type == "":
             selected_disaster_type = None
-
-        if user_address != "":
-            user_region = user_address
 
     except Exception:
         error_message = "위치 정보를 가져오지 못했습니다. 현재 위치를 허용하거나 주소를 다시 선택해주세요."
