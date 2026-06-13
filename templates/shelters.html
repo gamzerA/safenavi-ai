@@ -2,27 +2,20 @@
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>대피소 추천 | SafeNavi</title>
 
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
-
-    <!-- Leaflet 지도 라이브러리 -->
     <link
         rel="stylesheet"
         href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
-    />
-
-    <script
-        src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js">
-    </script>
-
-    <!-- Daum/Kakao 우편번호 검색 -->
-    <script src="https://t1.kakaocdn.net/mapjsapi/bundle/postcode/prod/postcode.v2.js"></script>
+    >
 </head>
-<body>
 
+<body>
 <header class="top-header">
-    <div class="logo">SafeNavi</div>
+    <a class="logo" href="/">SafeNavi</a>
+
     <nav>
         <a href="/">홈</a>
         <a href="/safety">안전지수</a>
@@ -33,98 +26,126 @@
 </header>
 
 <main class="container">
-
     <section class="page-title">
         <p class="badge">Shelter Recommendation</p>
-        <h1>맞춤형 대피소 TOP 3 추천</h1>
+        <h1>맞춤형 대피소 추천</h1>
         <p>
-            현재 위치 또는 원하는 주소를 기준으로 가까운 대피소를 찾고,
-            재난 유형별 적합도와 거리 점수를 반영하여 추천합니다.
+            현재 위치 또는 검색한 주소를 기준으로 거리와 재난 적합도를
+            종합해 가까운 대피소를 추천합니다.
         </p>
     </section>
 
-    <section class="content-card">
-        <h2>대피소 추천 기준 선택</h2>
-
-        <div class="location-guide">
-            <p>
-                현재 위치를 기준으로 주변 대피소를 찾거나, 원하는 주소를 검색하여 해당 위치 주변의 대피소를 추천받을 수 있습니다.
-                위도와 경도는 화면에 표시하지 않고, 거리 계산과 지도 표시를 위해 내부적으로만 사용됩니다.
-            </p>
+    <section class="content-card shelter-search-card">
+        <div class="section-heading-row">
+            <div>
+                <p class="section-kicker">Location</p>
+                <h2>위치와 재난 유형 선택</h2>
+            </div>
         </div>
 
-        <form method="post" class="form-grid" id="shelterForm">
+        <form id="shelterForm" method="post" action="/shelters">
+            <div class="shelter-search-row">
+                <div class="shelter-address-field">
+                    <label for="addressInput">주소 검색</label>
+                    <input
+                        id="addressInput"
+                        type="text"
+                        value="{{ user_address or user_region }}"
+                        placeholder="예: 경기도 용인시 처인구"
+                    >
+                </div>
+
+                <button
+                    type="button"
+                    id="addressSearchBtn"
+                    class="btn secondary"
+                >
+                    주소 찾기
+                </button>
+
+                <button
+                    type="button"
+                    id="currentLocationBtn"
+                    class="btn secondary"
+                >
+                    현재 위치
+                </button>
+            </div>
+
+            <div class="shelter-option-row">
+                <div>
+                    <label for="disasterType">재난 유형</label>
+
+                    <select id="disasterType" name="disaster_type">
+                        <option value="">지역 재난문자 자동 분석</option>
+
+                        {% for dtype in [
+                            '호우/침수',
+                            '태풍',
+                            '폭염',
+                            '한파',
+                            '대설',
+                            '지진',
+                            '지진해일',
+                            '산사태',
+                            '화재',
+                            '산불'
+                        ] %}
+                            <option
+                                value="{{ dtype }}"
+                                {% if selected_disaster_type == dtype %}
+                                    selected
+                                {% endif %}
+                            >
+                                {{ dtype }}
+                            </option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <div class="form-button">
+                    <button type="submit" class="btn primary">
+                        대피소 추천받기
+                    </button>
+                </div>
+            </div>
+
             <input
                 type="hidden"
-                name="lat"
                 id="latInput"
-                value="{% if has_searched %}{{ user_lat }}{% endif %}"
+                name="lat"
+                value="{{ user_lat }}"
             >
-
             <input
                 type="hidden"
-                name="lon"
                 id="lonInput"
-                value="{% if has_searched %}{{ user_lon }}{% endif %}"
+                name="lon"
+                value="{{ user_lon }}"
             >
-
             <input
                 type="hidden"
-                name="region"
                 id="regionInput"
+                name="region"
                 value="{{ user_region }}"
             >
-
             <input
                 type="hidden"
-                name="search_mode"
+                id="userAddressInput"
+                name="user_address"
+                value="{{ user_address }}"
+            >
+            <input
+                type="hidden"
                 id="searchModeInput"
-                value="{{ search_mode if search_mode else 'default' }}"
+                name="search_mode"
+                value="{{ search_mode }}"
             >
 
-            <div>
-                <label>추천 기준 위치</label>
-                <input
-                    type="text"
-                    name="user_address"
-                    id="addressInput"
-                    value="{{ user_address if user_address else '' }}"
-                    placeholder="현재 위치 또는 주소 검색 결과가 표시됩니다."
-                    readonly
-                >
-            </div>
-
-            <div>
-                <label>재난 유형</label>
-                <select name="disaster_type">
-                    <option value="" {% if not selected_disaster_type %}selected{% endif %}>자동 선택</option>
-                    <option value="호우/침수" {% if selected_disaster_type == "호우/침수" %}selected{% endif %}>호우/침수</option>
-                    <option value="태풍" {% if selected_disaster_type == "태풍" %}selected{% endif %}>태풍</option>
-                    <option value="산사태" {% if selected_disaster_type == "산사태" %}selected{% endif %}>산사태</option>
-                    <option value="폭염" {% if selected_disaster_type == "폭염" %}selected{% endif %}>폭염</option>
-                    <option value="한파" {% if selected_disaster_type == "한파" %}selected{% endif %}>한파</option>
-                    <option value="대설" {% if selected_disaster_type == "대설" %}selected{% endif %}>대설</option>
-                    <option value="지진" {% if selected_disaster_type == "지진" %}selected{% endif %}>지진</option>
-                    <option value="지진해일" {% if selected_disaster_type == "지진해일" %}selected{% endif %}>지진해일</option>
-                </select>
-            </div>
-
-            <div class="form-button button-row">
-                <button type="button" class="btn secondary" onclick="getCurrentLocation()">
-                    현재 위치로 찾기
-                </button>
-
-                <button type="button" class="btn secondary" onclick="openPostcode()">
-                    주소 검색
-                </button>
-
-                <button type="submit" class="btn primary">
-                    선택한 위치로 추천
-                </button>
-            </div>
+            <p id="locationStatus" class="small-text">
+                현재 기준 위치:
+                <strong>{{ user_address or user_region }}</strong>
+            </p>
         </form>
-
-        <p id="locationStatus" class="small-text"></p>
     </section>
 
     {% if error_message %}
@@ -133,330 +154,699 @@
         </div>
     {% endif %}
 
-    <section class="content-card">
-        <h2>추천 대피소 지도</h2>
+    <div class="shelter-page-layout">
+        {% if has_searched %}
+            <section class="shelter-result-section content-card">
+                <div class="section-heading-row">
+                    <div>
+                        <p class="section-kicker">Top Recommendations</p>
+                        <h2>추천 대피소 {{ shelters | length }}곳</h2>
 
-        {% if has_searched and shelters %}
-            <p class="small-text">
-                파란색 마커는 추천 기준 위치, 숫자 마커는 추천 대피소 TOP 3입니다.
-                마커를 클릭하면 네이버지도 위치 확인과 네이버지도 앱 길찾기를 사용할 수 있습니다.
-            </p>
-        {% elif has_searched and not shelters %}
-            <p class="small-text">
-                추천 결과가 없어 지도에 표시할 대피소가 없습니다.
-            </p>
-        {% else %}
-            <p class="small-text">
-                현재 위치 또는 주소를 선택하면 가까운 대피소 TOP 3가 지도에 표시됩니다.
-            </p>
-        {% endif %}
-
-        <div id="shelterMap"></div>
-    </section>
-
-    <section class="result-grid">
-        {% if shelters %}
-            {% for shelter in shelters %}
-                <div class="result-card">
-                    <div class="rank">{{ loop.index }}</div>
-
-                    <h2>{{ shelter.name }}</h2>
-                    <p class="sub-text">
-                        {{ shelter.display_address }}
-                    </p>
-
-                    <ul class="info-list">
-                        <li>기준 재난 유형: <strong>{{ shelter.disaster_type }}</strong></li>
-                        <li>대피소 유형: <strong>{{ shelter.shelter_type }}</strong></li>
-                        <li>
-                            거리:
-                            <strong>
-                                {% if shelter.distance_km != "" %}
-                                    {{ "%.2f"|format(shelter.distance_km) }}km
-                                {% else %}
-                                    정보 없음
-                                {% endif %}
-                            </strong>
-                        </li>
-                        <li>
-                            추천 점수:
-                            <strong>
-                                {% if shelter.recommend_score != "" %}
-                                    {{ "%.1f"|format(shelter.recommend_score) }}점
-                                {% else %}
-                                    정보 없음
-                                {% endif %}
-                            </strong>
-                        </li>
-                    </ul>
-
-                    <div class="score-detail">
-                        <span>거리 {{ shelter.distance_score }}점</span>
-                        <span>유형 {{ shelter.match_score }}점</span>
-                        <span>수용 {{ shelter.capacity_score }}점</span>
+                        <p class="small-text">
+                            모바일에서는 카드를 좌우로 밀어
+                            2·3위를 확인할 수 있습니다.
+                        </p>
                     </div>
-
-                    <p class="reason">
-                        {{ shelter.recommend_reason }}
-                    </p>
-
-                    <div class="route-buttons">
-                        <a
-                            class="btn secondary route-btn"
-                            href="https://map.naver.com/p/search/{{ shelter.name }}"
-                            target="_blank"
-                        >
-                            네이버지도에서 보기
-                        </a>
-
-                        <a
-                            class="btn secondary route-btn"
-                            href="nmap://route/walk?slat={{ user_lat }}&slng={{ user_lon }}&sname=%EC%B6%94%EC%B2%9C%EA%B8%B0%EC%A4%80%EC%9C%84%EC%B9%98&dlat={{ shelter.lat }}&dlng={{ shelter.lon }}&dname={{ shelter.name|urlencode }}&appname=safenavi"
-                        >
-                            네이버 도보
-                        </a>
-
-                        <a
-                            class="btn secondary route-btn"
-                            href="nmap://route/car?slat={{ user_lat }}&slng={{ user_lon }}&sname=%EC%B6%94%EC%B2%9C%EA%B8%B0%EC%A4%80%EC%9C%84%EC%B9%98&dlat={{ shelter.lat }}&dlng={{ shelter.lon }}&dname={{ shelter.name|urlencode }}&appname=safenavi"
-                        >
-                            네이버 자차
-                        </a>
-                    </div>
-
-                    <p class="small-text route-notice">
-                        ※ 네이버 도보/자차 버튼은 모바일에서 네이버지도 앱이 설치되어 있을 때 가장 잘 작동합니다.
-                    </p>
                 </div>
-            {% endfor %}
-        {% else %}
-            <div class="content-card">
-                {% if has_searched %}
-                    <p>추천 결과가 없습니다. 위치 정보나 재난 유형을 다시 확인해주세요.</p>
-                {% else %}
-                    <p>현재 위치 또는 주소를 선택하면 가까운 대피소를 추천받을 수 있습니다.</p>
-                {% endif %}
-            </div>
-        {% endif %}
-    </section>
 
+                {% if shelters %}
+                    <div class="shelter-result-grid">
+                        {% for shelter in shelters %}
+                            <article
+                                class="result-card shelter-compact-card"
+                                data-index="{{ loop.index0 }}"
+                                data-rank="{{ loop.index }}"
+                                data-lat="{{ shelter.lat }}"
+                                data-lon="{{ shelter.lon }}"
+                                data-name="{{ shelter.name }}"
+                            >
+                                <div class="shelter-card-head">
+                                    <span class="shelter-rank-pill">
+                                        {{ loop.index }}위
+                                    </span>
+
+                                    <div class="shelter-card-title">
+                                        <h3>{{ shelter.name }}</h3>
+
+                                        <p>
+                                            {{
+                                                shelter.display_address
+                                                or shelter.address
+                                                or '주소 정보 없음'
+                                            }}
+                                        </p>
+                                    </div>
+                                </div>
+
+                                <div class="shelter-key-facts">
+                                    <span>
+                                        <strong>
+                                            {{
+                                                '%.2f'
+                                                | format(
+                                                    shelter.distance_km
+                                                    | float
+                                                )
+                                            }}
+                                        </strong>
+                                        km
+                                    </span>
+
+                                    <span>
+                                        {{
+                                            shelter.shelter_type
+                                            | default('대피시설', true)
+                                        }}
+                                    </span>
+
+                                    <span>
+                                        <strong>
+                                            {{
+                                                '%.1f'
+                                                | format(
+                                                    shelter.recommend_score
+                                                    | float
+                                                )
+                                            }}
+                                        </strong>
+                                        점
+                                    </span>
+                                </div>
+
+                                <div class="route-buttons compact-route-buttons">
+                                    <button
+                                        type="button"
+                                        class="btn secondary map-focus-btn"
+                                    >
+                                        지도에서 보기
+                                    </button>
+
+                                    <button
+                                        type="button"
+                                        class="btn primary route-open-btn"
+                                        data-route-type="walk"
+                                    >
+                                        도보 길찾기
+                                    </button>
+
+                                    <button
+                                        type="button"
+                                        class="btn secondary route-open-btn"
+                                        data-route-type="car"
+                                    >
+                                        자동차 길찾기
+                                    </button>
+                                </div>
+
+                                <details class="shelter-detail">
+                                    <summary>상세 정보 보기</summary>
+
+                                    <div class="score-detail">
+                                        <span>
+                                            거리
+                                            {{
+                                                shelter.distance_score
+                                                | default(0, true)
+                                            }}점
+                                        </span>
+
+                                        <span>
+                                            재난 적합도
+                                            {{
+                                                shelter.match_score
+                                                | default(0, true)
+                                            }}점
+                                        </span>
+
+                                        <span>
+                                            수용
+                                            {{
+                                                shelter.capacity_score
+                                                | default(0, true)
+                                            }}점
+                                        </span>
+
+                                        <span>
+                                            출처
+                                            {{
+                                                shelter.source_score
+                                                | default(0, true)
+                                            }}점
+                                        </span>
+                                    </div>
+
+                                    <ul class="info-list">
+                                        <li>
+                                            <strong>수용 가능:</strong>
+                                            {{
+                                                shelter.capacity
+                                                | default(
+                                                    '정보 없음',
+                                                    true
+                                                )
+                                            }}
+                                        </li>
+
+                                        <li>
+                                            <strong>기준 재난:</strong>
+                                            {{
+                                                shelter.disaster_type
+                                                | default(
+                                                    '일반 대비',
+                                                    true
+                                                )
+                                            }}
+                                        </li>
+                                    </ul>
+
+                                    <p class="reason">
+                                        {{ shelter.recommend_reason }}
+                                    </p>
+                                </details>
+                            </article>
+                        {% endfor %}
+                    </div>
+                {% else %}
+                    <p class="empty-text">
+                        추천 가능한 대피소가 없습니다.
+                        위치나 검색 반경을 다시 확인하세요.
+                    </p>
+                {% endif %}
+            </section>
+
+            <section class="shelter-map-section content-card">
+                <div class="section-heading-row">
+                    <div>
+                        <p class="section-kicker">Map</p>
+                        <h2>지도에서 위치 확인</h2>
+                    </div>
+
+                    <div class="map-legend">
+                        <span class="map-legend-item">
+                            <span class="legend-current-dot"></span>
+                            현재 기준 위치
+                        </span>
+
+                        <span class="map-legend-item">
+                            <span class="legend-shelter-dot">1</span>
+                            추천 대피소
+                        </span>
+                    </div>
+                </div>
+
+                <div id="shelterMap"></div>
+
+                <p class="route-notice">
+                    실제 재난 상황에서는 소방·지자체의 통제와
+                    지정 대피 안내를 우선하세요.
+                </p>
+            </section>
+        {% else %}
+            <section class="content-card shelter-empty-state">
+                <h2>위치를 선택해 주세요</h2>
+
+                <p>
+                    주소를 검색하거나 현재 위치 버튼을 누른 뒤
+                    추천받기를 선택하세요.
+                </p>
+            </section>
+        {% endif %}
+    </div>
 </main>
 
 <footer>
     SafeNavi Capstone Design Project
 </footer>
 
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
 <script>
-    const shelters = {{ shelters | tojson }};
-    const userLat = Number("{{ user_lat }}");
-    const userLon = Number("{{ user_lon }}");
+    const form = document.getElementById("shelterForm");
+    const latInput = document.getElementById("latInput");
+    const lonInput = document.getElementById("lonInput");
+    const regionInput = document.getElementById("regionInput");
+    const userAddressInput = document.getElementById(
+        "userAddressInput"
+    );
+    const searchModeInput = document.getElementById(
+        "searchModeInput"
+    );
+    const statusEl = document.getElementById("locationStatus");
 
-    let map;
+    function setStatus(text, isError = false) {
+        statusEl.textContent = text;
+        statusEl.style.color = isError
+            ? "#be123c"
+            : "#475569";
+    }
 
-    function initMap() {
-        const defaultLat = isNaN(userLat) ? 37.2410 : userLat;
-        const defaultLon = isNaN(userLon) ? 127.1776 : userLon;
+    function escapeHtml(value) {
+        return String(value ?? "")
+            .replaceAll("&", "&amp;")
+            .replaceAll("<", "&lt;")
+            .replaceAll(">", "&gt;")
+            .replaceAll('"', "&quot;")
+            .replaceAll("'", "&#039;");
+    }
 
-        map = L.map("shelterMap").setView([defaultLat, defaultLon], 14);
+    function getStartLocation() {
+        const startLat = Number(latInput.value);
+        const startLon = Number(lonInput.value);
 
-        L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-            maxZoom: 19,
-            attribution: "&copy; OpenStreetMap contributors"
-        }).addTo(map);
-
-        const userIcon = L.divIcon({
-            className: "user-location-marker",
-            html: "📍",
-            iconSize: [34, 34],
-            iconAnchor: [17, 34]
-        });
-
-        L.marker([defaultLat, defaultLon], { icon: userIcon })
-            .addTo(map)
-            .bindPopup("<strong>추천 기준 위치</strong><br>대피소 추천 기준 위치");
-
-        const bounds = [[defaultLat, defaultLon]];
-
-        if (shelters && shelters.length > 0) {
-            shelters.forEach((shelter, index) => {
-                const lat = Number(shelter.lat);
-                const lon = Number(shelter.lon);
-
-                if (!isNaN(lat) && !isNaN(lon)) {
-                    const shelterIcon = L.divIcon({
-                        className: "shelter-rank-marker",
-                        html: String(index + 1),
-                        iconSize: [32, 32],
-                        iconAnchor: [16, 32]
-                    });
-
-                    const shelterName = shelter.name || "대피소";
-                    const shelterType = shelter.shelter_type || "정보 없음";
-
-                    const distanceText = isNaN(Number(shelter.distance_km))
-                        ? "정보 없음"
-                        : Number(shelter.distance_km).toFixed(2) + "km";
-
-                    const scoreText = isNaN(Number(shelter.recommend_score))
-                        ? "정보 없음"
-                        : Number(shelter.recommend_score).toFixed(1) + "점";
-
-                    const encodedShelterName = encodeURIComponent(shelterName);
-                    const encodedCurrentName = encodeURIComponent("추천기준위치");
-
-                    const naverWebUrl =
-                        `https://map.naver.com/p/search/${encodedShelterName}`;
-
-                    const naverWalkUrl =
-                        `nmap://route/walk?slat=${defaultLat}&slng=${defaultLon}&sname=${encodedCurrentName}&dlat=${lat}&dlng=${lon}&dname=${encodedShelterName}&appname=safenavi`;
-
-                    const naverCarUrl =
-                        `nmap://route/car?slat=${defaultLat}&slng=${defaultLon}&sname=${encodedCurrentName}&dlat=${lat}&dlng=${lon}&dname=${encodedShelterName}&appname=safenavi`;
-
-                    const popupContent = `
-                        <strong>${index + 1}. ${shelterName}</strong><br>
-                        유형: ${shelterType}<br>
-                        거리: ${distanceText}<br>
-                        추천 점수: ${scoreText}<br><br>
-
-                        <a href="${naverWebUrl}" target="_blank">네이버지도에서 보기</a><br>
-                        <a href="${naverWalkUrl}">네이버 도보 길찾기</a><br>
-                        <a href="${naverCarUrl}">네이버 자차 길찾기</a><br>
-                        <span style="font-size:12px;color:#6b7280;">
-                            모바일 네이버지도 앱에서 가장 잘 작동합니다.
-                        </span>
-                    `;
-
-                    L.marker([lat, lon], { icon: shelterIcon })
-                        .addTo(map)
-                        .bindPopup(popupContent);
-
-                    bounds.push([lat, lon]);
-                }
-            });
+        if (
+            !Number.isFinite(startLat)
+            || !Number.isFinite(startLon)
+        ) {
+            return null;
         }
 
-        if (bounds.length > 1) {
-            map.fitBounds(bounds, {
-                padding: [40, 40]
-            });
-        }
+        const startName = (
+            userAddressInput.value
+            || regionInput.value
+            || "현재 기준 위치"
+        ).trim();
+
+        return {
+            lat: startLat,
+            lon: startLon,
+            name: startName || "현재 기준 위치"
+        };
     }
 
-    function submitShelterForm() {
-        document.getElementById("shelterForm").submit();
-    }
+    function openKakaoRoute(
+        destinationName,
+        destinationLat,
+        destinationLon,
+        routeType
+    ) {
+        const start = getStartLocation();
 
-    function setLocationValues(lat, lon, address, searchMode) {
-        document.getElementById("latInput").value = lat;
-        document.getElementById("lonInput").value = lon;
-        document.getElementById("addressInput").value = address;
-        document.getElementById("regionInput").value = address;
-        document.getElementById("searchModeInput").value = searchMode;
-    }
-
-    function getCurrentLocation() {
-        const status = document.getElementById("locationStatus");
-
-        if (!navigator.geolocation) {
-            status.innerText = "이 브라우저에서는 현재 위치 기능을 지원하지 않습니다.";
+        if (!start) {
+            alert(
+                "출발지 위치를 확인할 수 없습니다. "
+                + "현재 위치 또는 주소 검색을 먼저 진행해주세요."
+            );
             return;
         }
 
-        status.innerText = "현재 위치를 가져오는 중입니다. 위치 권한을 허용해주세요.";
+        const destinationLatNumber = Number(destinationLat);
+        const destinationLonNumber = Number(destinationLon);
 
-        navigator.geolocation.getCurrentPosition(
-            function(position) {
-                const lat = position.coords.latitude.toFixed(6);
-                const lon = position.coords.longitude.toFixed(6);
+        if (
+            !Number.isFinite(destinationLatNumber)
+            || !Number.isFinite(destinationLonNumber)
+        ) {
+            alert("선택한 대피소의 위치 정보가 올바르지 않습니다.");
+            return;
+        }
 
-                status.innerText = "현재 위치 주소를 확인하는 중입니다.";
+        const startPart = [
+            encodeURIComponent(start.name),
+            start.lat,
+            start.lon
+        ].join(",");
 
-                fetch(`/api/reverse-geocode?lat=${lat}&lon=${lon}`)
-                    .then(response => response.json())
-                    .then(data => {
-                        const address = data.status === "success"
-                            ? data.address
-                            : "현재 위치 기준";
+        const destinationPart = [
+            encodeURIComponent(destinationName),
+            destinationLatNumber,
+            destinationLonNumber
+        ].join(",");
 
-                        setLocationValues(lat, lon, address, "current");
+        const routeUrl = (
+            "https://map.kakao.com/link/by/"
+            + routeType
+            + "/"
+            + startPart
+            + "/"
+            + destinationPart
+        );
 
-                        status.innerText = "현재 위치를 기준으로 대피소를 추천합니다.";
-
-                        submitShelterForm();
-                    })
-                    .catch(function() {
-                        setLocationValues(lat, lon, "현재 위치 기준", "current");
-
-                        status.innerText = "현재 위치를 기준으로 대피소를 추천합니다.";
-
-                        submitShelterForm();
-                    });
-            },
-            function(error) {
-                if (error.code === error.PERMISSION_DENIED) {
-                    status.innerText = "위치 권한이 거부되었습니다. 주소 검색을 이용해주세요.";
-                } else if (error.code === error.POSITION_UNAVAILABLE) {
-                    status.innerText = "현재 위치 정보를 사용할 수 없습니다. 주소 검색을 이용해주세요.";
-                } else if (error.code === error.TIMEOUT) {
-                    status.innerText = "현재 위치 요청 시간이 초과되었습니다. 다시 시도해주세요.";
-                } else {
-                    status.innerText = "현재 위치를 가져오지 못했습니다. 주소 검색을 이용해주세요.";
-                }
-            },
-            {
-                enableHighAccuracy: true,
-                timeout: 10000,
-                maximumAge: 0
-            }
+        window.open(
+            routeUrl,
+            "_blank",
+            "noopener,noreferrer"
         );
     }
 
-    function openPostcode() {
-        const status = document.getElementById("locationStatus");
+    document
+        .getElementById("addressSearchBtn")
+        .addEventListener("click", async () => {
+            const address = document
+                .getElementById("addressInput")
+                .value
+                .trim();
 
-        new daum.Postcode({
-            oncomplete: function(data) {
-                let address = data.roadAddress;
-
-                if (!address) {
-                    address = data.jibunAddress;
-                }
-
-                if (!address) {
-                    status.innerText = "주소를 선택하지 못했습니다. 다시 검색해주세요.";
-                    return;
-                }
-
-                document.getElementById("addressInput").value = address;
-                document.getElementById("regionInput").value = address;
-                document.getElementById("searchModeInput").value = "address";
-
-                status.innerText = "주소를 좌표로 변환하는 중입니다.";
-
-                fetch(`/api/geocode?address=${encodeURIComponent(address)}`)
-                    .then(response => response.json())
-                    .then(data => {
-                        if (data.status !== "success") {
-                            status.innerText = data.message || "주소 좌표 변환에 실패했습니다.";
-                            return;
-                        }
-
-                        setLocationValues(data.lat, data.lon, address, "address");
-
-                        status.innerText = "선택한 주소를 기준으로 대피소를 추천합니다.";
-
-                        submitShelterForm();
-                    })
-                    .catch(function() {
-                        status.innerText = "주소 좌표 변환 중 오류가 발생했습니다.";
-                    });
+            if (!address) {
+                setStatus("주소를 입력하세요.", true);
+                return;
             }
-        }).open();
-    }
 
-    document.addEventListener("DOMContentLoaded", initMap);
+            setStatus("주소를 찾는 중입니다...");
+
+            try {
+                const response = await fetch(
+                    "/api/geocode?address="
+                    + encodeURIComponent(address)
+                );
+
+                const data = await response.json();
+
+                if (
+                    !response.ok
+                    || data.status !== "success"
+                ) {
+                    throw new Error(
+                        data.message
+                        || "주소를 찾지 못했습니다."
+                    );
+                }
+
+                latInput.value = data.lat;
+                lonInput.value = data.lon;
+                regionInput.value = data.region || address;
+                userAddressInput.value = (
+                    data.address
+                    || address
+                );
+                searchModeInput.value = "address";
+
+                setStatus(
+                    "검색 위치: "
+                    + (data.address || address)
+                );
+            } catch (error) {
+                setStatus(error.message, true);
+            }
+        });
+
+    document
+        .getElementById("currentLocationBtn")
+        .addEventListener("click", () => {
+            if (!navigator.geolocation) {
+                setStatus(
+                    "현재 위치 기능을 지원하지 않는 "
+                    + "브라우저입니다.",
+                    true
+                );
+                return;
+            }
+
+            setStatus("현재 위치를 확인하는 중입니다...");
+
+            navigator.geolocation.getCurrentPosition(
+                async (position) => {
+                    const currentLat = (
+                        position.coords.latitude
+                    );
+                    const currentLon = (
+                        position.coords.longitude
+                    );
+
+                    latInput.value = currentLat;
+                    lonInput.value = currentLon;
+                    searchModeInput.value = "current";
+
+                    try {
+                        const response = await fetch(
+                            "/api/reverse-geocode"
+                            + "?lat="
+                            + encodeURIComponent(currentLat)
+                            + "&lon="
+                            + encodeURIComponent(currentLon)
+                        );
+
+                        const data = await response.json();
+
+                        const address = (
+                            data.address
+                            || "현재 위치"
+                        );
+
+                        regionInput.value = (
+                            data.region
+                            || address
+                        );
+                        userAddressInput.value = address;
+
+                        document.getElementById(
+                            "addressInput"
+                        ).value = address;
+
+                        setStatus(
+                            "현재 위치: " + address
+                        );
+                    } catch (error) {
+                        regionInput.value = "현재 위치";
+                        userAddressInput.value = "현재 위치";
+
+                        setStatus(
+                            "현재 위치 좌표를 적용했습니다."
+                        );
+                    }
+                },
+                () => {
+                    setStatus(
+                        "위치 권한을 허용하거나 "
+                        + "주소 검색을 이용하세요.",
+                        true
+                    );
+                },
+                {
+                    enableHighAccuracy: true,
+                    timeout: 10000
+                }
+            );
+        });
+
+    form.addEventListener("submit", (event) => {
+        if (!latInput.value || !lonInput.value) {
+            event.preventDefault();
+
+            setStatus(
+                "주소 검색 또는 현재 위치 확인을 "
+                + "먼저 진행하세요.",
+                true
+            );
+        }
+    });
+
+    {% if has_searched and shelters %}
+        const userLat = Number({{ user_lat | tojson }});
+        const userLon = Number({{ user_lon | tojson }});
+
+        const map = L.map("shelterMap").setView(
+            [userLat, userLon],
+            14
+        );
+
+        L.tileLayer(
+            "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
+            {
+                attribution:
+                    "&copy; OpenStreetMap contributors"
+            }
+        ).addTo(map);
+
+        const currentLocationIcon = L.divIcon({
+            className: "custom-user-marker-wrapper",
+            html: `
+                <div class="current-location-marker">
+                    <span class="current-location-dot"></span>
+                </div>
+            `,
+            iconSize: [36, 36],
+            iconAnchor: [18, 18],
+            popupAnchor: [0, -18]
+        });
+
+        const currentLocationMarker = L.marker(
+            [userLat, userLon],
+            {
+                icon: currentLocationIcon,
+                zIndexOffset: 1000
+            }
+        ).addTo(map);
+
+        currentLocationMarker.bindPopup(
+            "<strong>현재 기준 위치</strong><br>"
+            + escapeHtml(
+                userAddressInput.value
+                || regionInput.value
+                || "사용자 위치"
+            )
+        );
+
+        const markers = [];
+        const bounds = L.latLngBounds([
+            [userLat, userLon]
+        ]);
+
+        {% for shelter in shelters %}
+            {
+                const shelterLat = Number(
+                    {{ shelter.lat | tojson }}
+                );
+                const shelterLon = Number(
+                    {{ shelter.lon | tojson }}
+                );
+                const rank = {{ loop.index }};
+                const shelterName = (
+                    {{ shelter.name | tojson }}
+                );
+                const shelterAddress = (
+                    {{
+                        (
+                            shelter.display_address
+                            or shelter.address
+                            or ""
+                        )
+                        | tojson
+                    }}
+                );
+                const shelterType = (
+                    {{
+                        (
+                            shelter.shelter_type
+                            or "대피시설"
+                        )
+                        | tojson
+                    }}
+                );
+                const shelterDistance = Number(
+                    {{
+                        shelter.distance_km
+                        | default(0, true)
+                        | tojson
+                    }}
+                );
+                const shelterScore = Number(
+                    {{
+                        shelter.recommend_score
+                        | default(0, true)
+                        | tojson
+                    }}
+                );
+
+                const shelterIcon = L.divIcon({
+                    className:
+                        "custom-shelter-marker-wrapper",
+                    html: `
+                        <div class="shelter-rank-marker">
+                            <span class="shelter-rank-number">
+                                ${rank}
+                            </span>
+                        </div>
+                    `,
+                    iconSize: [40, 40],
+                    iconAnchor: [20, 40],
+                    popupAnchor: [0, -38]
+                });
+
+                const marker = L.marker(
+                    [shelterLat, shelterLon],
+                    {
+                        icon: shelterIcon
+                    }
+                ).addTo(map);
+
+                marker.bindPopup(`
+                    <div class="map-popup">
+                        <strong>
+                            ${rank}위
+                            ${escapeHtml(shelterName)}
+                        </strong>
+                        <br>
+                        <span>
+                            ${escapeHtml(shelterType)}
+                        </span>
+                        <br>
+                        <span>
+                            거리:
+                            ${shelterDistance.toFixed(2)}km
+                        </span>
+                        <br>
+                        <span>
+                            추천점수:
+                            ${shelterScore.toFixed(1)}점
+                        </span>
+                        <br>
+                        <span>
+                            ${escapeHtml(shelterAddress)}
+                        </span>
+                    </div>
+                `);
+
+                markers.push(marker);
+                bounds.extend(
+                    [shelterLat, shelterLon]
+                );
+            }
+        {% endfor %}
+
+        if (bounds.isValid()) {
+            map.fitBounds(bounds, {
+                padding: [45, 45],
+                maxZoom: 15
+            });
+        }
+
+        document
+            .querySelectorAll(".map-focus-btn")
+            .forEach((button, index) => {
+                button.addEventListener("click", () => {
+                    const card = button.closest(
+                        ".shelter-compact-card"
+                    );
+
+                    const shelterLat = Number(
+                        card.dataset.lat
+                    );
+                    const shelterLon = Number(
+                        card.dataset.lon
+                    );
+
+                    map.setView(
+                        [shelterLat, shelterLon],
+                        16,
+                        {
+                            animate: true
+                        }
+                    );
+
+                    if (markers[index]) {
+                        markers[index].openPopup();
+                    }
+
+                    document
+                        .getElementById("shelterMap")
+                        .scrollIntoView({
+                            behavior: "smooth",
+                            block: "center"
+                        });
+                });
+            });
+
+        document
+            .querySelectorAll(".route-open-btn")
+            .forEach((button) => {
+                button.addEventListener("click", () => {
+                    const card = button.closest(
+                        ".shelter-compact-card"
+                    );
+
+                    openKakaoRoute(
+                        card.dataset.name,
+                        card.dataset.lat,
+                        card.dataset.lon,
+                        button.dataset.routeType
+                    );
+                });
+            });
+
+        setTimeout(() => {
+            map.invalidateSize();
+        }, 200);
+    {% endif %}
 </script>
-
 </body>
 </html>
