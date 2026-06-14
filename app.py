@@ -1,13 +1,19 @@
+import hmac
 import os
+import threading
+
 import requests
 import pandas as pd
-from flask import Flask, render_template, request
+from flask import Flask, jsonify, render_template, request
 
 from modules.safety_score import calculate_today_safety_score
 from modules.shelter_recommender import recommend_shelters
 from modules.action_guide_rag import generate_rag_answer
 from modules.share_message import generate_share_message
-from modules.update_disaster_alerts import update_disaster_alerts
+from modules.update_disaster_alerts import (
+    UpdateAlreadyRunningError,
+    update_disaster_alerts,
+)
 
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -26,6 +32,9 @@ KAKAO_REST_API_KEY = os.environ.get("KAKAO_REST_API_KEY", "")
 
 
 app = Flask(__name__)
+
+# 동일한 웹 프로세스에서 업데이트 요청이 겹치는 것을 방지한다.
+ALERT_UPDATE_LOCK = threading.Lock()
 
 
 
@@ -480,13 +489,6 @@ def normalize_rag_result(rag_result, question=""):
         "disaster_type": disaster_type,
         "situation_type": situation_type,
         "answer": answer,
-        "summary": rag_result.get("summary", answer),
-        "immediate_actions": rag_result.get("immediate_actions", []) or [],
-        "prohibited_actions": rag_result.get("prohibited_actions", []) or [],
-        "detail": rag_result.get("detail", ""),
-        "best_title": rag_result.get("best_title", ""),
-        "best_score": rag_result.get("best_score", 0),
-        "is_low_confidence": bool(rag_result.get("is_low_confidence", False)),
         "references": normalized_references
     }
 
@@ -739,9 +741,6 @@ def shelters():
         user_lat = float(lat_value)
         user_lon = float(lon_value)
 
-        # user_region은 재난문자·지역 데이터 필터링용 행정구역명이다.
-        # user_address는 화면 표시와 길찾기 출발지용 상세 주소다.
-        # 두 값을 서로 덮어쓰지 않고 별도로 유지한다.
         user_region = (request.form.get("region") or user_region).strip()
         user_address = (request.form.get("user_address") or "").strip()
         search_mode = (request.form.get("search_mode") or "default").strip()
@@ -750,6 +749,9 @@ def shelters():
 
         if selected_disaster_type == "":
             selected_disaster_type = None
+
+        if user_address != "":
+            user_region = user_address
 
     except Exception:
         error_message = "위치 정보를 가져오지 못했습니다. 현재 위치를 허용하거나 주소를 다시 선택해주세요."
@@ -980,49 +982,109 @@ def data_shelters():
 
 # 긴급재난문자 자동 업데이트 경로
 
-@app.route("/update-alerts")
+@app.route("/update-alerts", methods=["POST"])
 def update_alerts():
     """
-    긴급재난문자 자동 업데이트용 관리자 경로.
+    Render Cron Job 또는 관리자 요청으로 긴급재난문자를 갱신한다.
 
-    사용 예:
-    /update-alerts?key=설정한비밀키
+    인증 헤더:
+        X-Update-Key: UPDATE_SECRET_KEY와 같은 값
+
+    선택 JSON:
+        {"days": 2}
+
+    days 값은 1~7 범위만 허용한다.
     """
 
-    secret_key = os.environ.get("UPDATE_SECRET_KEY")
-    request_key = request.args.get("key")
+    expected_key = os.environ.get(
+        "UPDATE_SECRET_KEY",
+        "",
+    ).strip()
+    provided_key = request.headers.get(
+        "X-Update-Key",
+        "",
+    ).strip()
 
-    if not secret_key:
-        return {
+    if not expected_key:
+        return jsonify({
             "status": "error",
-            "message": "UPDATE_SECRET_KEY가 설정되어 있지 않습니다."
-        }, 500
+            "message": (
+                "UPDATE_SECRET_KEY 환경변수가 "
+                "설정되지 않았습니다."
+            ),
+        }), 500
 
-    if request_key != secret_key:
-        return {
+    if not hmac.compare_digest(
+        provided_key,
+        expected_key,
+    ):
+        return jsonify({
             "status": "error",
-            "message": "잘못된 접근입니다."
-        }, 403
+            "message": "업데이트 권한이 없습니다.",
+        }), 403
+
+    if not ALERT_UPDATE_LOCK.acquire(blocking=False):
+        return jsonify({
+            "status": "busy",
+            "message": (
+                "긴급재난문자 업데이트가 이미 "
+                "실행 중입니다."
+            ),
+        }), 409
 
     try:
-        result = update_disaster_alerts(
-            days=7,
-            region_name=None
+        request_data = request.get_json(silent=True) or {}
+        days_value = request_data.get(
+            "days",
+            os.environ.get("DISASTER_UPDATE_DAYS", "2"),
         )
 
-        return {
+        try:
+            days = int(days_value)
+        except (TypeError, ValueError):
+            return jsonify({
+                "status": "error",
+                "message": "days는 정수여야 합니다.",
+            }), 400
+
+        if days < 1 or days > 7:
+            return jsonify({
+                "status": "error",
+                "message": "days는 1~7 범위여야 합니다.",
+            }), 400
+
+        result = update_disaster_alerts(
+            days=days,
+            region_name=None,
+        )
+
+        return jsonify({
             "status": "success",
-            "message": "긴급재난문자 업데이트가 완료되었습니다.",
-            "result": result
-        }
+            "message": (
+                "긴급재난문자 자동 업데이트가 "
+                "완료되었습니다."
+            ),
+            "result": result,
+        })
 
-    except Exception as e:
-        print(f"[긴급재난문자 업데이트 오류] {e}")
+    except UpdateAlreadyRunningError as error:
+        return jsonify({
+            "status": "busy",
+            "message": str(error),
+        }), 409
 
-        return {
+    except Exception as error:
+        app.logger.exception(
+            "긴급재난문자 자동 업데이트 실패"
+        )
+
+        return jsonify({
             "status": "error",
-            "message": str(e)
-        }, 500
+            "message": str(error),
+        }), 500
+
+    finally:
+        ALERT_UPDATE_LOCK.release()
 
 
 # 상태 확인용 경로
@@ -1042,7 +1104,7 @@ def health():
 
 if __name__ == "__main__":
     app.run(
-        host="0.0.0.0",
-        port=int(os.environ.get("PORT", 5000)),
+        host="127.0.0.1",
+        port=5001,
         debug=False
     )

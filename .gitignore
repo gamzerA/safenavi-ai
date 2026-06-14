@@ -1,6 +1,13 @@
 .env
+.env.*
+!.env.example
+
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
+
 .DS_Store
 
 data/raw/
+data/.disaster_alert_update.lock

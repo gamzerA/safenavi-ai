@@ -1,365 +1,528 @@
+"""
+SafeNavi 긴급재난문자 수집기
+
+주요 기능
+1. 행정안전부 긴급재난문자 API 호출
+2. 최근 N일 데이터를 날짜별·페이지별로 수집
+3. API 원본 컬럼을 SafeNavi 공통 컬럼으로 정규화
+4. 기존 CSV와 신규 데이터를 병합
+5. 중복 제거 후 원자적으로 파일 저장
+6. API 오류나 빈 응답 발생 시 기존 데이터를 보호
+"""
+
+from __future__ import annotations
+
 import os
 import time
 from datetime import datetime, timedelta
+from pathlib import Path
+from typing import Any
 
-import requests
 import pandas as pd
+import requests
 from dotenv import load_dotenv
 
 
 load_dotenv()
 
+BASE_DIR = Path(__file__).resolve().parents[1]
+RAW_OUTPUT_PATH = BASE_DIR / "data" / "raw" / "disaster_alerts_raw.csv"
+PROCESSED_OUTPUT_PATH = (
+    BASE_DIR / "data" / "processed" / "disaster_alerts.csv"
+)
 
-RAW_OUTPUT_PATH = "data/raw/disaster_alerts_raw.csv"
-PROCESSED_OUTPUT_PATH = "data/processed/disaster_alerts.csv"
+DEFAULT_NUM_ROWS = 100
+DEFAULT_MAX_PAGES = 10
 
 
-def get_env_value(name):
-    """
-    .env 파일에서 값을 가져오고 앞뒤 공백을 제거한다.
-    """
+def get_env_value(name: str) -> str | None:
+    """환경변수를 읽고 앞뒤 공백을 제거한다."""
     value = os.getenv(name)
 
     if value is None:
         return None
 
-    return value.strip()
+    value = value.strip()
+    return value or None
 
 
-def mask_key(key):
-    """
-    인증키를 출력할 때 전체가 노출되지 않도록 일부만 보여준다.
-    """
+def get_positive_int_env(name: str, default: int) -> int:
+    """양의 정수 환경변수를 안전하게 읽는다."""
+    value = get_env_value(name)
+
+    if value is None:
+        return default
+
+    try:
+        number = int(value)
+        return number if number > 0 else default
+    except (TypeError, ValueError):
+        return default
+
+
+def mask_key(key: str | None) -> str:
+    """로그에 API 키 전체가 노출되지 않도록 일부만 표시한다."""
     if not key:
         return "없음"
 
     if len(key) <= 10:
         return "***"
 
-    return key[:5] + "..." + key[-5:]
+    return f"{key[:5]}...{key[-5:]}"
 
 
-def request_with_retry(url, params, max_retries=3, timeout=30):
+def safe_read_csv(path: Path) -> pd.DataFrame:
+    """CSV가 없거나 손상된 경우 빈 DataFrame을 반환한다."""
+    if not path.exists():
+        return pd.DataFrame()
+
+    for encoding in ("utf-8-sig", "utf-8", "cp949"):
+        try:
+            return pd.read_csv(path, encoding=encoding)
+        except UnicodeDecodeError:
+            continue
+        except pd.errors.EmptyDataError:
+            return pd.DataFrame()
+        except Exception as error:
+            print(f"[긴급재난문자] CSV 읽기 오류: {path} / {error}")
+            return pd.DataFrame()
+
+    return pd.DataFrame()
+
+
+def atomic_write_csv(df: pd.DataFrame, path: Path) -> None:
     """
-    API 요청 중 연결이 끊기거나 시간이 초과되면 재시도한다.
+    임시 파일에 먼저 저장한 후 교체한다.
+    저장 중 장애가 발생해 기존 파일이 깨지는 것을 방지한다.
     """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = path.with_suffix(path.suffix + ".tmp")
 
+    df.to_csv(temp_path, index=False, encoding="utf-8-sig")
+    os.replace(temp_path, path)
+
+
+def request_with_retry(
+    url: str,
+    params: dict[str, Any],
+    max_retries: int = 3,
+    timeout: int = 30,
+) -> requests.Response:
+    """연결 오류·시간 초과·일시적 서버 오류에 재시도한다."""
     headers = {
-        "User-Agent": "Mozilla/5.0",
+        "User-Agent": "SafeNavi/1.0",
         "Accept": "application/json, text/plain, */*",
-        "Connection": "close"
+        "Connection": "close",
     }
 
-    last_error = None
+    last_error: Exception | None = None
 
     for attempt in range(1, max_retries + 1):
         try:
-            print(f"[긴급재난문자] API 요청 시도 {attempt}/{max_retries}")
+            print(
+                "[긴급재난문자] API 요청 "
+                f"{attempt}/{max_retries}, page={params.get('pageNo')}"
+            )
 
             response = requests.get(
                 url,
                 params=params,
                 headers=headers,
-                timeout=timeout
+                timeout=timeout,
             )
 
-            print(f"[긴급재난문자] HTTP 상태코드: {response.status_code}")
+            print(
+                "[긴급재난문자] HTTP 상태코드: "
+                f"{response.status_code}"
+            )
+
+            # 429 및 5xx는 일시 오류일 수 있으므로 재시도한다.
+            if response.status_code == 429 or response.status_code >= 500:
+                response.raise_for_status()
 
             response.raise_for_status()
             return response
 
-        except requests.exceptions.ConnectionError as e:
-            last_error = e
-            print(f"[긴급재난문자] 연결 오류 발생: {e}")
-            print("[긴급재난문자] 3초 후 재시도합니다.")
-            time.sleep(3)
+        except (
+            requests.exceptions.ConnectionError,
+            requests.exceptions.Timeout,
+            requests.exceptions.HTTPError,
+        ) as error:
+            last_error = error
 
-        except requests.exceptions.Timeout as e:
-            last_error = e
-            print(f"[긴급재난문자] 시간 초과 발생: {e}")
-            print("[긴급재난문자] 3초 후 재시도합니다.")
-            time.sleep(3)
+            retryable = (
+                isinstance(
+                    error,
+                    (
+                        requests.exceptions.ConnectionError,
+                        requests.exceptions.Timeout,
+                    ),
+                )
+                or getattr(error.response, "status_code", 0) == 429
+                or getattr(error.response, "status_code", 0) >= 500
+            )
 
-        except requests.exceptions.HTTPError as e:
-            last_error = e
-            print(f"[긴급재난문자] HTTP 오류 발생: {e}")
-            break
+            print(f"[긴급재난문자] 요청 오류: {error}")
 
-    raise last_error
+            if not retryable or attempt >= max_retries:
+                break
+
+            wait_seconds = min(2 ** attempt, 10)
+            print(
+                f"[긴급재난문자] {wait_seconds}초 후 재시도합니다."
+            )
+            time.sleep(wait_seconds)
+
+    if last_error is not None:
+        raise last_error
+
+    raise RuntimeError("긴급재난문자 API 요청에 실패했습니다.")
 
 
-def extract_items_from_response(data):
-    """
-    긴급재난문자 API 응답 구조에서 실제 데이터 목록을 추출한다.
-    """
+def parse_response_to_json(response: requests.Response) -> Any:
+    """API 응답을 JSON으로 변환한다."""
+    try:
+        return response.json()
+    except Exception as error:
+        preview = response.text[:1000]
+        raise ValueError(
+            "긴급재난문자 API 응답이 JSON 형식이 아닙니다.\n"
+            f"응답 일부: {preview}"
+        ) from error
 
+
+def check_api_error(data: Any) -> None:
+    """공공 API의 결과코드와 오류 메시지를 검사한다."""
+    if not isinstance(data, dict):
+        return
+
+    response_data = data.get("response")
+    response_header = (
+        response_data.get("header", {})
+        if isinstance(response_data, dict)
+        else {}
+    )
+    header = data.get("header") or response_header or {}
+
+    result_code = str(
+        header.get("resultCode")
+        or data.get("resultCode")
+        or ""
+    ).strip()
+
+    result_msg = str(
+        header.get("resultMsg")
+        or header.get("errorMsg")
+        or data.get("resultMsg")
+        or data.get("errorMsg")
+        or ""
+    ).strip()
+
+    if not result_code:
+        return
+
+    normal_codes = {
+        "00",
+        "0",
+        "NORMAL_CODE",
+        "NORMAL_SERVICE",
+        "SUCCESS",
+    }
+
+    if result_code in normal_codes:
+        return
+
+    if result_code == "30":
+        raise ValueError(
+            "긴급재난문자 API 인증키 오류입니다. "
+            "DISASTER_SERVICE_KEY와 API 활용승인 상태를 확인하세요."
+        )
+
+    raise ValueError(
+        "긴급재난문자 API 오류: "
+        f"resultCode={result_code}, message={result_msg}"
+    )
+
+
+def _walk_path(data: Any, path: list[str]) -> Any:
+    current = data
+
+    for key in path:
+        if not isinstance(current, dict):
+            return None
+        current = current.get(key)
+
+    return current
+
+
+def extract_items_from_response(data: Any) -> list[dict[str, Any]]:
+    """여러 형태의 공공 API 응답에서 실제 목록을 추출한다."""
     possible_paths = [
         ["body"],
         ["data"],
         ["items"],
         ["item"],
+        ["result"],
+        ["list"],
         ["response", "body", "items", "item"],
         ["response", "body", "items"],
         ["response", "body"],
-        ["result"],
-        ["list"],
     ]
 
     for path in possible_paths:
-        current = data
+        current = _walk_path(data, path)
 
-        try:
-            for key in path:
-                current = current[key]
+        if isinstance(current, list):
+            return [
+                item
+                for item in current
+                if isinstance(item, dict)
+            ]
 
-            if isinstance(current, list):
-                return current
+        if isinstance(current, dict):
+            # items 안에 item이 한 번 더 들어간 구조를 처리한다.
+            nested_item = current.get("item")
 
-            if isinstance(current, dict):
+            if isinstance(nested_item, list):
+                return [
+                    item
+                    for item in nested_item
+                    if isinstance(item, dict)
+                ]
+
+            if isinstance(nested_item, dict):
+                return [nested_item]
+
+            # 본문 dict 자체가 한 건의 데이터인 경우
+            if any(
+                key in current
+                for key in (
+                    "MSG_CN",
+                    "msgCn",
+                    "message",
+                    "RCPTN_RGN_NM",
+                )
+            ):
                 return [current]
 
-        except (KeyError, TypeError):
-            continue
-
     if isinstance(data, list):
-        return data
+        return [
+            item
+            for item in data
+            if isinstance(item, dict)
+        ]
 
     return []
 
 
-def find_column(df, candidates):
-    """
-    후보 컬럼명 중 실제 DataFrame에 존재하는 컬럼명을 찾는다.
-    """
-    for col in candidates:
-        if col in df.columns:
-            return col
+def extract_total_count(data: Any) -> int | None:
+    """응답에서 전체 건수를 찾는다."""
+    candidates = [
+        data.get("totalCount") if isinstance(data, dict) else None,
+        _walk_path(data, ["body", "totalCount"]),
+        _walk_path(data, ["response", "body", "totalCount"]),
+    ]
+
+    for value in candidates:
+        try:
+            if value is not None and str(value).strip() != "":
+                return int(value)
+        except (TypeError, ValueError):
+            continue
 
     return None
 
 
-def check_api_error(data):
-    """
-    API 응답의 오류 메시지를 확인한다.
-    """
+def find_column(
+    df: pd.DataFrame,
+    candidates: list[str],
+) -> str | None:
+    """후보 컬럼 중 실제 존재하는 첫 번째 컬럼을 찾는다."""
+    normalized_map = {
+        str(column).strip().lower(): column
+        for column in df.columns
+    }
 
-    if not isinstance(data, dict):
-        return
+    for candidate in candidates:
+        actual = normalized_map.get(candidate.strip().lower())
 
-    header = data.get("header") or data.get("response", {}).get("header", {})
+        if actual is not None:
+            return actual
 
-    result_code = str(header.get("resultCode", "")).strip()
-    result_msg = str(header.get("resultMsg", "")).strip()
-    error_msg = str(header.get("errorMsg", "")).strip()
-
-    if not result_code:
-        return
-
-    if result_code in ["00", "0", "NORMAL_CODE", "NORMAL_SERVICE"]:
-        return
-
-    if result_code == "30":
-        raise ValueError(
-            "긴급재난문자 API 인증키 오류입니다.\n"
-            "resultCode: 30\n"
-            "원인: 등록되지 않은 서비스키입니다.\n"
-            "확인할 것:\n"
-            "1. DISASTER_SERVICE_KEY에 긴급재난문자 API용 인증키를 넣었는지 확인\n"
-            "2. 기상특보/생활기상지수 인증키를 잘못 넣지 않았는지 확인\n"
-            "3. 긴급재난문자 API 활용신청이 승인 상태인지 확인"
-        )
-
-    raise ValueError(
-        f"긴급재난문자 API 오류 발생\n"
-        f"resultCode: {result_code}\n"
-        f"resultMsg: {result_msg}\n"
-        f"errorMsg: {error_msg}"
-    )
-
-
-def parse_response_to_json(response):
-    """
-    API 응답을 JSON으로 변환한다.
-    JSON이 아니면 원문 일부를 출력하고 빈 dict를 반환한다.
-    """
-
-    try:
-        return response.json()
-    except Exception:
-        print("[긴급재난문자] JSON 변환 실패")
-        print("[긴급재난문자] 응답 원문 일부:")
-        print(response.text[:1000])
-        return {}
+    return None
 
 
 def fetch_disaster_alerts(
-    target_date=None,
-    num_rows=100,
-    page_no=1,
-    region_name=None
-):
-    """
-    긴급재난문자 API를 호출한다.
-
-    기본 설정:
-    - 지역 조건 없이 전체 재난문자 조회
-    - 특정 지역을 넣고 싶을 때만 region_name 사용
-
-    Parameters
-    ----------
-    target_date : str | None
-        YYYYMMDD 형식. None이면 오늘 날짜 사용.
-    num_rows : int
-        한 번에 가져올 행 수
-    page_no : int
-        페이지 번호
-    region_name : str | None
-        지역명. None이면 지역 조건 없이 전체 조회.
-
-    Returns
-    -------
-    pandas.DataFrame
-        API 원본 데이터
-    """
-
+    target_date: str | None = None,
+    num_rows: int = DEFAULT_NUM_ROWS,
+    page_no: int = 1,
+    region_name: str | None = None,
+) -> tuple[pd.DataFrame, int | None]:
+    """특정 날짜·페이지의 긴급재난문자를 조회한다."""
     service_key = get_env_value("DISASTER_SERVICE_KEY")
     api_url = get_env_value("DISASTER_ALERT_API_URL")
 
     if not service_key:
-        raise ValueError(".env에 DISASTER_SERVICE_KEY가 없습니다.")
+        raise ValueError(
+            "DISASTER_SERVICE_KEY 환경변수가 설정되지 않았습니다."
+        )
 
     if not api_url:
-        raise ValueError(".env에 DISASTER_ALERT_API_URL이 없습니다.")
-
-    if not api_url.startswith("http"):
         raise ValueError(
-            "DISASTER_ALERT_API_URL은 http 또는 https로 시작해야 합니다.\n"
-            "예: https://www.safetydata.go.kr/V2/api/DSSP-IF-00247"
+            "DISASTER_ALERT_API_URL 환경변수가 설정되지 않았습니다."
+        )
+
+    if not api_url.startswith(("http://", "https://")):
+        raise ValueError(
+            "DISASTER_ALERT_API_URL은 http:// 또는 https://로 "
+            "시작해야 합니다."
         )
 
     if target_date is None:
         target_date = datetime.now().strftime("%Y%m%d")
 
-    print("======================================")
-    print("[긴급재난문자] API 호출 정보")
-    print("======================================")
-    print(f"URL: {api_url}")
-    print(f"서비스키: {mask_key(service_key)}")
-    print(f"조회일자: {target_date}")
-
-    if region_name:
-        print(f"조회지역: {region_name}")
-    else:
-        print("조회지역: 전체 조회")
-    print("======================================")
-
-    # 핵심 수정 부분:
-    # rgnNm을 기본적으로 넣지 않는다.
-    params = {
+    params: dict[str, Any] = {
         "serviceKey": service_key,
         "numOfRows": num_rows,
         "pageNo": page_no,
         "returnType": "json",
-        "crtDt": target_date
+        "crtDt": target_date,
     }
 
-    # 필요할 때만 지역 조건 추가
     if region_name:
         params["rgnNm"] = region_name
 
+    print("======================================")
+    print("[긴급재난문자] API 호출")
+    print(f"URL: {api_url}")
+    print(f"서비스키: {mask_key(service_key)}")
+    print(f"조회일자: {target_date}")
+    print(f"페이지: {page_no}")
+    print(f"지역: {region_name or '전체'}")
+    print("======================================")
+
     response = request_with_retry(api_url, params=params)
-
     data = parse_response_to_json(response)
-
-    if not data:
-        return pd.DataFrame()
-
     check_api_error(data)
 
-    total_count = data.get("totalCount", None)
-    if total_count is not None:
-        print(f"[긴급재난문자] totalCount: {total_count}")
-
     items = extract_items_from_response(data)
+    total_count = extract_total_count(data)
 
     if not items:
-        print("[긴급재난문자] 조회 결과가 없습니다.")
-        print("[긴급재난문자] 응답 일부:")
-        print(str(data)[:1000])
-        return pd.DataFrame()
+        return pd.DataFrame(), total_count
 
     raw_df = pd.DataFrame(items)
 
-    print(f"[긴급재난문자] 원본 데이터 수: {len(raw_df):,}개")
-    print(f"[긴급재난문자] 원본 컬럼: {list(raw_df.columns)}")
+    print(
+        "[긴급재난문자] 조회 건수: "
+        f"{len(raw_df):,}, totalCount={total_count}"
+    )
 
-    return raw_df
+    return raw_df, total_count
+
+
+def fetch_disaster_alerts_for_date(
+    target_date: str,
+    num_rows: int = DEFAULT_NUM_ROWS,
+    max_pages: int = DEFAULT_MAX_PAGES,
+    region_name: str | None = None,
+) -> pd.DataFrame:
+    """한 날짜의 데이터를 페이지 끝까지 수집한다."""
+    frames: list[pd.DataFrame] = []
+    total_count: int | None = None
+
+    for page_no in range(1, max_pages + 1):
+        page_df, page_total = fetch_disaster_alerts(
+            target_date=target_date,
+            num_rows=num_rows,
+            page_no=page_no,
+            region_name=region_name,
+        )
+
+        if total_count is None:
+            total_count = page_total
+
+        if page_df.empty:
+            break
+
+        frames.append(page_df)
+
+        fetched_count = sum(len(frame) for frame in frames)
+
+        if len(page_df) < num_rows:
+            break
+
+        if total_count is not None and fetched_count >= total_count:
+            break
+
+        # 공공 API에 과도한 연속 요청을 보내지 않도록 짧게 대기한다.
+        time.sleep(0.15)
+
+    if not frames:
+        return pd.DataFrame()
+
+    return pd.concat(frames, ignore_index=True).drop_duplicates()
 
 
 def fetch_disaster_alerts_recent_days(
-    days=7,
-    num_rows=100,
-    region_name=None
-):
-    """
-    최근 N일간의 긴급재난문자를 날짜별로 호출해서 합친다.
+    days: int = 2,
+    num_rows: int = DEFAULT_NUM_ROWS,
+    max_pages: int = DEFAULT_MAX_PAGES,
+    region_name: str | None = None,
+) -> pd.DataFrame:
+    """최근 N일의 데이터를 날짜별로 수집한다."""
+    if days < 1:
+        raise ValueError("days는 1 이상의 정수여야 합니다.")
 
-    기본값:
-    - region_name=None
-    - 지역 조건 없이 전체 조회
-    """
+    frames: list[pd.DataFrame] = []
+    failed_dates: list[str] = []
 
-    all_dataframes = []
+    for offset in range(days):
+        target_date = (
+            datetime.now() - timedelta(days=offset)
+        ).strftime("%Y%m%d")
 
-    for i in range(days):
-        target_date = (datetime.now() - timedelta(days=i)).strftime("%Y%m%d")
-
-        print()
-        print(f"[긴급재난문자] {target_date} 데이터 조회 시작")
+        print(f"[긴급재난문자] {target_date} 조회 시작")
 
         try:
-            df = fetch_disaster_alerts(
+            day_df = fetch_disaster_alerts_for_date(
                 target_date=target_date,
                 num_rows=num_rows,
-                page_no=1,
-                region_name=region_name
+                max_pages=max_pages,
+                region_name=region_name,
             )
 
-            if not df.empty:
-                all_dataframes.append(df)
+            if not day_df.empty:
+                frames.append(day_df)
 
-        except Exception as e:
-            print(f"[긴급재난문자] {target_date} 조회 실패: {e}")
+        except Exception as error:
+            failed_dates.append(target_date)
+            print(
+                f"[긴급재난문자] {target_date} 조회 실패: {error}"
+            )
 
-    if not all_dataframes:
-        return pd.DataFrame()
+    if not frames:
+        failed_text = ", ".join(failed_dates) or "없음"
+        raise RuntimeError(
+            "최근 긴급재난문자를 한 건도 수집하지 못했습니다. "
+            f"실패 날짜: {failed_text}"
+        )
 
-    merged_df = pd.concat(all_dataframes, ignore_index=True)
-    merged_df = merged_df.drop_duplicates()
-
-    return merged_df
+    merged = pd.concat(frames, ignore_index=True)
+    return merged.drop_duplicates()
 
 
-def normalize_disaster_alerts(raw_df):
-    """
-    긴급재난문자 원본 데이터를 SafeNavi 서비스용 컬럼으로 변환한다.
-
-    최종 저장 컬럼:
-    - alert_id
-    - created_at
-    - region
-    - message
-    - emergency_level
-    - disaster_category
-    """
-
+def normalize_disaster_alerts(
+    raw_df: pd.DataFrame,
+) -> pd.DataFrame:
+    """API 원본 데이터를 SafeNavi 공통 컬럼으로 변환한다."""
     columns = [
         "alert_id",
         "created_at",
         "region",
         "message",
         "emergency_level",
-        "disaster_category"
+        "disaster_category",
     ]
 
     if raw_df.empty:
@@ -367,148 +530,329 @@ def normalize_disaster_alerts(raw_df):
 
     col_id = find_column(
         raw_df,
-        ["SN", "sn", "MD101_SN", "md101Sn", "alert_id", "일련번호"]
+        [
+            "SN",
+            "sn",
+            "MD101_SN",
+            "md101Sn",
+            "alert_id",
+            "일련번호",
+        ],
     )
-
     col_created = find_column(
         raw_df,
         [
-            "CRT_DT", "crtDt",
-            "CREAT_DT", "creatDt",
+            "CRT_DT",
+            "crtDt",
+            "CREAT_DT",
+            "creatDt",
             "created_at",
-            "REG_YMD", "regYmd",
-            "생성일시", "등록일시"
-        ]
+            "REG_YMD",
+            "regYmd",
+            "생성일시",
+            "등록일시",
+        ],
     )
-
     col_region = find_column(
         raw_df,
         [
-            "RCPTN_RGN_NM", "rcptnRgnNm",
-            "RCPTN_RGN", "rcptnRgn",
-            "RCPNT_RGN_NM", "rcpntRgnNm",
+            "RCPTN_RGN_NM",
+            "rcptnRgnNm",
+            "RCPTN_RGN",
+            "rcptnRgn",
+            "RCPNT_RGN_NM",
+            "rcpntRgnNm",
             "region",
-            "수신지역", "지역"
-        ]
+            "수신지역",
+            "지역",
+        ],
     )
-
     col_message = find_column(
         raw_df,
         [
-            "MSG_CN", "msgCn",
-            "MSG_CNTS", "msgCnts",
+            "MSG_CN",
+            "msgCn",
+            "MSG_CNTS",
+            "msgCnts",
             "message",
             "메시지내용",
             "재난문자내용",
-            "내용"
-        ]
+            "내용",
+        ],
     )
-
     col_level = find_column(
         raw_df,
         [
-            "EMRG_STEP_NM", "emrgStepNm",
+            "EMRG_STEP_NM",
+            "emrgStepNm",
             "emergency_level",
-            "긴급단계명"
-        ]
+            "긴급단계명",
+        ],
     )
-
     col_category = find_column(
         raw_df,
         [
-            "DST_SE_NM", "dstSeNm",
-            "DSSTR_SE_NM", "dsstrSeNm",
+            "DST_SE_NM",
+            "dstSeNm",
+            "DSSTR_SE_NM",
+            "dsstrSeNm",
             "disaster_category",
             "재해구분명",
-            "재난구분명"
-        ]
+            "재난구분명",
+        ],
     )
 
-    result = pd.DataFrame()
+    result = pd.DataFrame(index=raw_df.index)
 
-    result["alert_id"] = raw_df[col_id] if col_id else range(1, len(raw_df) + 1)
-    result["created_at"] = raw_df[col_created] if col_created else ""
-    result["region"] = raw_df[col_region] if col_region else "지역 미확인"
-    result["message"] = raw_df[col_message] if col_message else ""
-    result["emergency_level"] = raw_df[col_level] if col_level else ""
-    result["disaster_category"] = raw_df[col_category] if col_category else ""
+    if col_id:
+        result["alert_id"] = raw_df[col_id]
+    else:
+        # ID가 없는 API 응답은 이후 메시지·시각·지역 조합으로 중복 제거한다.
+        result["alert_id"] = ""
 
-    result["region"] = result["region"].fillna("지역 미확인").astype(str)
-    result["message"] = result["message"].fillna("").astype(str)
-    result["created_at"] = result["created_at"].fillna("").astype(str)
-    result["emergency_level"] = result["emergency_level"].fillna("").astype(str)
-    result["disaster_category"] = result["disaster_category"].fillna("").astype(str)
+    result["created_at"] = (
+        raw_df[col_created] if col_created else ""
+    )
+    result["region"] = (
+        raw_df[col_region] if col_region else "지역 미확인"
+    )
+    result["message"] = (
+        raw_df[col_message] if col_message else ""
+    )
+    result["emergency_level"] = (
+        raw_df[col_level] if col_level else ""
+    )
+    result["disaster_category"] = (
+        raw_df[col_category] if col_category else ""
+    )
 
-    # message가 완전히 비어 있는 행은 제거
-    result = result[result["message"].str.strip() != ""]
+    for column in columns:
+        result[column] = (
+            result[column]
+            .fillna("")
+            .astype(str)
+            .str.strip()
+        )
 
-    return result[columns]
+    result.loc[
+        result["region"].eq(""),
+        "region",
+    ] = "지역 미확인"
+
+    result = result[result["message"].ne("")].copy()
+
+    # 정렬을 위해 파싱 가능한 시간 컬럼을 임시 생성한다.
+    parsed_time = pd.to_datetime(
+        result["created_at"],
+        errors="coerce",
+    )
+    result["_parsed_time"] = parsed_time
+
+    result = deduplicate_alerts(result)
+    result = result.sort_values(
+        by="_parsed_time",
+        ascending=False,
+        na_position="last",
+    ).drop(columns=["_parsed_time"], errors="ignore")
+
+    return result[columns].reset_index(drop=True)
+
+
+def deduplicate_alerts(df: pd.DataFrame) -> pd.DataFrame:
+    """문자 ID 또는 시각·지역·내용 조합으로 중복을 제거한다."""
+    if df.empty:
+        return df
+
+    result = df.copy()
+
+    for column in ("alert_id", "created_at", "region", "message"):
+        if column not in result.columns:
+            result[column] = ""
+        result[column] = (
+            result[column]
+            .fillna("")
+            .astype(str)
+            .str.strip()
+        )
+
+    has_id = result["alert_id"].ne("")
+    with_id = result[has_id].drop_duplicates(
+        subset=["alert_id"],
+        keep="last",
+    )
+    without_id = result[~has_id].drop_duplicates(
+        subset=["created_at", "region", "message"],
+        keep="last",
+    )
+
+    result = pd.concat(
+        [with_id, without_id],
+        ignore_index=True,
+        sort=False,
+    )
+
+    return result.drop_duplicates(
+        subset=["created_at", "region", "message"],
+        keep="last",
+    )
+
+
+def merge_processed_alerts(
+    existing_df: pd.DataFrame,
+    new_df: pd.DataFrame,
+    retention_days: int = 30,
+) -> pd.DataFrame:
+    """기존 데이터와 신규 데이터를 합치고 보관기간을 적용한다."""
+    if existing_df.empty:
+        merged = new_df.copy()
+    elif new_df.empty:
+        merged = existing_df.copy()
+    else:
+        merged = pd.concat(
+            [existing_df, new_df],
+            ignore_index=True,
+            sort=False,
+        )
+
+    expected_columns = [
+        "alert_id",
+        "created_at",
+        "region",
+        "message",
+        "emergency_level",
+        "disaster_category",
+    ]
+
+    for column in expected_columns:
+        if column not in merged.columns:
+            merged[column] = ""
+
+    merged = deduplicate_alerts(merged)
+
+    parsed_time = pd.to_datetime(
+        merged["created_at"],
+        errors="coerce",
+    )
+
+    if retention_days > 0 and parsed_time.notna().any():
+        cutoff = pd.Timestamp.now() - pd.Timedelta(
+            days=retention_days
+        )
+
+        # 날짜 파싱이 안 되는 기존 데이터는 보존한다.
+        keep_mask = parsed_time.isna() | parsed_time.ge(cutoff)
+        merged = merged.loc[keep_mask].copy()
+        parsed_time = parsed_time.loc[keep_mask]
+
+    merged["_parsed_time"] = parsed_time
+    merged = merged.sort_values(
+        "_parsed_time",
+        ascending=False,
+        na_position="last",
+    )
+    merged = merged.drop(
+        columns=["_parsed_time"],
+        errors="ignore",
+    )
+
+    return merged[expected_columns].reset_index(drop=True)
 
 
 def save_disaster_alerts(
-    days=7,
-    region_name=None,
-    save_empty=True
-):
+    days: int = 2,
+    region_name: str | None = None,
+    save_empty: bool = False,
+    merge_existing: bool = True,
+    retention_days: int | None = None,
+) -> pd.DataFrame:
     """
-    최근 N일치 긴급재난문자 API 호출 후 raw/processed 파일 저장.
+    최근 긴급재난문자를 수집하고 기존 파일과 안전하게 병합한다.
 
-    기본값:
-    - 지역 조건 없이 전체 조회
-    - 최근 7일 조회
+    API가 비어 있거나 실패한 경우 기존 CSV를 빈 파일로 덮어쓰지 않는다.
     """
+    retention_days = retention_days or get_positive_int_env(
+        "DISASTER_RETENTION_DAYS",
+        30,
+    )
+    num_rows = get_positive_int_env(
+        "DISASTER_NUM_ROWS",
+        DEFAULT_NUM_ROWS,
+    )
+    max_pages = get_positive_int_env(
+        "DISASTER_MAX_PAGES",
+        DEFAULT_MAX_PAGES,
+    )
 
-    os.makedirs("data/raw", exist_ok=True)
-    os.makedirs("data/processed", exist_ok=True)
+    RAW_OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
+    PROCESSED_OUTPUT_PATH.parent.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
 
     raw_df = fetch_disaster_alerts_recent_days(
         days=days,
-        num_rows=100,
-        region_name=region_name
+        num_rows=num_rows,
+        max_pages=max_pages,
+        region_name=region_name,
     )
 
-    if not raw_df.empty:
-        raw_df.to_csv(RAW_OUTPUT_PATH, index=False, encoding="utf-8-sig")
-        print()
-        print(f"[긴급재난문자] 원본 저장 완료: {RAW_OUTPUT_PATH}")
-        print(f"[긴급재난문자] 원본 행 수: {len(raw_df):,}개")
+    if raw_df.empty:
+        existing = safe_read_csv(PROCESSED_OUTPUT_PATH)
 
-    processed_df = normalize_disaster_alerts(raw_df)
+        if not existing.empty:
+            print(
+                "[긴급재난문자] 신규 데이터가 없어 기존 파일을 유지합니다."
+            )
+            return existing
 
-    if not processed_df.empty or save_empty:
-        processed_df.to_csv(PROCESSED_OUTPUT_PATH, index=False, encoding="utf-8-sig")
-        print()
-        print(f"[긴급재난문자] 서비스용 저장 완료: {PROCESSED_OUTPUT_PATH}")
-        print(f"[긴급재난문자] 서비스용 행 수: {len(processed_df):,}개")
+        if save_empty:
+            empty_df = normalize_disaster_alerts(pd.DataFrame())
+            atomic_write_csv(empty_df, PROCESSED_OUTPUT_PATH)
+            return empty_df
 
-    if not processed_df.empty:
-        print()
-        print("[긴급재난문자] 서비스용 컬럼")
-        print(list(processed_df.columns))
+        raise RuntimeError("수집된 긴급재난문자가 없습니다.")
 
-        print()
-        print("[긴급재난문자] 미리보기")
-        print(processed_df.head(5))
+    atomic_write_csv(raw_df, RAW_OUTPUT_PATH)
 
-        print()
-        print("[긴급재난문자] 지역별 개수")
-        print(processed_df["region"].value_counts().head(10))
+    new_processed_df = normalize_disaster_alerts(raw_df)
+    existing_processed_df = (
+        safe_read_csv(PROCESSED_OUTPUT_PATH)
+        if merge_existing
+        else pd.DataFrame()
+    )
 
-    else:
-        print()
-        print("[긴급재난문자] 저장된 데이터가 없습니다.")
-        print("가능한 원인:")
-        print("1. 최근 조회 기간에 전체 재난문자가 없음")
-        print("2. API 파라미터명이 문서와 다름")
-        print("3. 인증키 또는 활용신청 상태 문제")
-        print("4. API 서버 연결 차단 또는 일시 장애")
+    final_df = merge_processed_alerts(
+        existing_processed_df,
+        new_processed_df,
+        retention_days=retention_days,
+    )
 
-    return processed_df
+    if final_df.empty and not save_empty:
+        raise RuntimeError(
+            "정규화 후 저장할 긴급재난문자가 없습니다."
+        )
+
+    atomic_write_csv(final_df, PROCESSED_OUTPUT_PATH)
+
+    print(
+        "[긴급재난문자] 업데이트 완료: "
+        f"신규 {len(new_processed_df):,}건, "
+        f"최종 {len(final_df):,}건"
+    )
+    print(f"[긴급재난문자] 저장 위치: {PROCESSED_OUTPUT_PATH}")
+
+    return final_df
 
 
 if __name__ == "__main__":
-    # 지역 조건 없이 최근 7일 전체 긴급재난문자 조회
+    update_days = get_positive_int_env(
+        "DISASTER_UPDATE_DAYS",
+        2,
+    )
+
     save_disaster_alerts(
-        days=7,
-        region_name=None
+        days=update_days,
+        region_name=None,
+        save_empty=False,
+        merge_existing=True,
     )

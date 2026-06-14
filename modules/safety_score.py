@@ -1,6 +1,8 @@
 import os
 import re
 import pandas as pd
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -193,6 +195,109 @@ def filter_df_by_region(df, region_name=None):
             axis=1
         )
     ].copy()
+
+    return filtered_df
+
+def find_datetime_column(df):
+    """
+    긴급재난문자 발송일시가 들어 있는 컬럼을 찾는다.
+    """
+
+    candidates = [
+        "created_at",
+        "CRT_DT",
+        "crtDt",
+        "CREAT_DT",
+        "creatDt",
+        "REG_YMD",
+        "regYmd",
+        "생성일시",
+        "등록일시",
+        "발송일시"
+    ]
+
+    for column in candidates:
+        if column in df.columns:
+            return column
+
+    return None
+
+
+def parse_datetime_series(series):
+    """
+    여러 형식의 재난문자 날짜를 pandas datetime으로 변환한다.
+    """
+
+    text_series = (
+        series
+        .fillna("")
+        .astype(str)
+        .str.strip()
+    )
+
+    parsed = pd.to_datetime(
+        text_series,
+        errors="coerce"
+    )
+
+    # 20260614153000 같은 숫자형 날짜를 한 번 더 처리
+    unresolved = parsed.isna() & text_series.str.match(
+        r"^\d{8,14}$",
+        na=False
+    )
+
+    if unresolved.any():
+        for date_format, length in [
+            ("%Y%m%d%H%M%S", 14),
+            ("%Y%m%d%H%M", 12),
+            ("%Y%m%d", 8)
+        ]:
+            mask = unresolved & text_series.str.len().eq(length)
+
+            if mask.any():
+                parsed.loc[mask] = pd.to_datetime(
+                    text_series.loc[mask],
+                    format=date_format,
+                    errors="coerce"
+                )
+
+    return parsed
+
+
+def filter_alerts_by_today(df):
+    """
+    한국 시간 기준 오늘 발송된 긴급재난문자만 반환한다.
+    """
+
+    if df.empty:
+        return df
+
+    datetime_column = find_datetime_column(df)
+
+    if datetime_column is None:
+        print(
+            "[안전지수] 긴급재난문자 날짜 컬럼을 찾지 못해 "
+            "날짜 필터를 적용하지 않았습니다."
+        )
+        return df
+
+    parsed_datetime = parse_datetime_series(
+        df[datetime_column]
+    )
+
+    today_kst = datetime.now(
+        ZoneInfo("Asia/Seoul")
+    ).date()
+
+    filtered_df = df[
+        parsed_datetime.dt.date == today_kst
+    ].copy()
+
+    print(
+        f"[안전지수] 오늘 날짜 필터: "
+        f"{len(df)}건 → {len(filtered_df)}건 "
+        f"({today_kst})"
+    )
 
     return filtered_df
 
@@ -837,12 +942,23 @@ def calculate_today_safety_score(region_name=None):
     weather_df = safe_read_csv(WEATHER_WARNINGS_PATH)
     living_df = safe_read_csv(LIVING_WEATHER_PATH)
 
-    if selected_region:
-        alerts_df = filter_df_by_region(alerts_df, selected_region)
-        weather_df = filter_df_by_region(weather_df, selected_region)
-        living_df = filter_df_by_region(living_df, selected_region)
+    # 긴급재난문자는 한국 시간 기준 오늘 데이터만 사용
+    alerts_df = filter_alerts_by_today(alerts_df)
 
-    # 화면에 표시할 해당 지역 자연재난 문자 원문
+    if selected_region:
+        alerts_df = filter_df_by_region(
+            alerts_df,
+            selected_region
+        )
+        weather_df = filter_df_by_region(
+            weather_df,
+            selected_region
+        )
+        living_df = filter_df_by_region(
+            living_df,
+            selected_region
+        )
+        # 화면에 표시할 해당 지역 자연재난 문자 원문
     local_alerts = build_local_alerts(alerts_df, limit=5)
 
     alert_score, alert_detail = score_from_disaster_alerts(alerts_df)
