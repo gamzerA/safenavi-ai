@@ -1,7 +1,8 @@
 import os
 import re
 import pandas as pd
-
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -32,6 +33,119 @@ def safe_read_csv(path):
         return pd.read_csv(path, encoding="utf-8-sig")
     except pd.errors.EmptyDataError:
         return pd.DataFrame()
+
+
+def find_datetime_column(df):
+    """
+    긴급재난문자 발송일시가 저장된 컬럼을 찾는다.
+    """
+
+    candidates = [
+        "created_at",
+        "CRT_DT",
+        "crtDt",
+        "CREAT_DT",
+        "creatDt",
+        "REG_YMD",
+        "regYmd",
+        "생성일시",
+        "등록일시",
+        "발송일시"
+    ]
+
+    for column in candidates:
+        if column in df.columns:
+            return column
+
+    return None
+
+
+def parse_datetime_series(series):
+    """
+    여러 형식의 재난문자 날짜를 datetime으로 변환한다.
+    """
+
+    text_series = (
+        series
+        .fillna("")
+        .astype(str)
+        .str.strip()
+    )
+
+    parsed = pd.to_datetime(
+        text_series,
+        errors="coerce"
+    )
+
+    unresolved = (
+        parsed.isna()
+        & text_series.str.match(
+            r"^\d{8,14}$",
+            na=False
+        )
+    )
+
+    date_formats = [
+        ("%Y%m%d%H%M%S", 14),
+        ("%Y%m%d%H%M", 12),
+        ("%Y%m%d", 8)
+    ]
+
+    for date_format, length in date_formats:
+        mask = (
+            unresolved
+            & text_series.str.len().eq(length)
+        )
+
+        if mask.any():
+            parsed.loc[mask] = pd.to_datetime(
+                text_series.loc[mask],
+                format=date_format,
+                errors="coerce"
+            )
+
+    return parsed
+
+
+def filter_alerts_by_today(alerts_df):
+    """
+    한국 시간 기준 오늘 발송된 긴급재난문자만 반환한다.
+    """
+
+    if alerts_df.empty:
+        return alerts_df.copy()
+
+    datetime_column = find_datetime_column(alerts_df)
+
+    if datetime_column is None:
+        print(
+            "[안심 공유] 재난문자 날짜 컬럼을 찾지 못해 "
+            "오늘 날짜 필터를 적용할 수 없습니다."
+        )
+
+        # 날짜를 확인할 수 없는 데이터를 과거 문자처럼
+        # 잘못 공유하지 않도록 빈 결과를 반환한다.
+        return alerts_df.iloc[0:0].copy()
+
+    parsed_datetime = parse_datetime_series(
+        alerts_df[datetime_column]
+    )
+
+    today_kst = datetime.now(
+        ZoneInfo("Asia/Seoul")
+    ).date()
+
+    filtered_df = alerts_df[
+        parsed_datetime.dt.date == today_kst
+    ].copy()
+
+    print(
+        f"[안심 공유] 오늘 재난문자 필터: "
+        f"{len(alerts_df)}건 → {len(filtered_df)}건 "
+        f"({today_kst})"
+    )
+
+    return filtered_df
 
 
 def normalize_region_text(text):
@@ -353,109 +467,260 @@ def generate_share_message(
     recommended_df=None
 ):
     """
-    가족에게 보낼 안심 공유 문구를 생성한다.
+    가족이나 지인에게 전달할 SafeNavi 안심 공유 문구를 생성한다.
 
     Parameters
     ----------
     user_status : str
-        사용자 상태. 예: 안전, 이동 중, 대피소 확인 완료
+        사용자의 현재 상태.
+        예: 안전, 이동 중, 대피소 확인 완료, 대피 완료
+
     user_region : str
-        사용자 현재 위치 지역명. 예: 경기도 용인시
+        사용자의 현재 위치 지역명.
+        예: 경기도 용인시
+
     include_shelter : bool
-        추천 대피소 정보를 포함할지 여부
+        추천 대피소 정보를 메시지에 포함할지 여부
+
     tone : str
-        normal 또는 short
+        normal: 상세 메시지
+        short: 간단 메시지
+
     recommended_df : pandas.DataFrame or None
-        공유 페이지에서 선택한 현재 위치/주소 기준으로 새로 계산한 추천 대피소 결과.
-        None이면 기존 recommended_shelters.csv를 읽는다.
+        공유 페이지에서 현재 위치를 기준으로 계산한
+        추천 대피소 결과이다.
+
+        None인 경우 기존 recommended_shelters.csv를 읽는다.
+
+    Returns
+    -------
+    str
+        최종 안심 공유 메시지
     """
 
-    alerts_df = safe_read_csv(ALERTS_ANALYZED_PATH)
+    # 오늘 날짜의 긴급재난문자만 불러오기
+
+    alerts_df = safe_read_csv(
+        ALERTS_ANALYZED_PATH
+    )
+
+    alerts_df = filter_alerts_by_today(
+        alerts_df
+    )
+
+    # 추천 대피소 데이터 준비
 
     if recommended_df is None:
-        recommended_df = safe_read_csv(RECOMMENDED_SHELTERS_PATH)
-    elif not isinstance(recommended_df, pd.DataFrame):
-        recommended_df = pd.DataFrame(recommended_df)
+        recommended_df = safe_read_csv(
+            RECOMMENDED_SHELTERS_PATH
+        )
+
+    elif not isinstance(
+        recommended_df,
+        pd.DataFrame
+    ):
+        recommended_df = pd.DataFrame(
+            recommended_df
+        )
+
+    # 지역 재난정보와 추천 대피소 분석
 
     disaster_info = get_latest_main_disaster_info(
         alerts_df=alerts_df,
         user_region=user_region
     )
 
-    shelter_info = get_top_shelter_info(recommended_df)
+    shelter_info = get_top_shelter_info(
+        recommended_df
+    )
 
-    has_local_alert = disaster_info["has_local_alert"]
-    disaster_type = disaster_info["main_disaster_type"]
-    region = disaster_info["region"]
-    risk_level = disaster_info["risk_level"]
-    easy_summary = disaster_info["easy_summary"]
+    has_local_alert = disaster_info.get(
+        "has_local_alert",
+        False
+    )
+
+    disaster_type = disaster_info.get(
+        "main_disaster_type",
+        "관련 재난 없음"
+    )
+
+    region = disaster_info.get(
+        "region",
+        user_region
+    )
+
+    risk_level = disaster_info.get(
+        "risk_level",
+        "정보 없음"
+    )
+
+    easy_summary = disaster_info.get(
+        "easy_summary",
+        "현재 확인된 재난정보가 없습니다."
+    )
+
+    # 사용자 상태 문장 생성
+
+    status_sentence_map = {
+        "안전": "저는 현재 안전해요.",
+        "이동 중": "저는 현재 안전한 장소로 이동 중이에요.",
+        "대피소 확인 완료": "가까운 대피소 위치를 확인했어요.",
+        "대피 완료": "저는 안전한 장소로 대피했어요."
+    }
+
+    status_sentence = status_sentence_map.get(
+        user_status,
+        f"현재 상태는 '{user_status}'입니다."
+    )
+
+    # 재난 유형에 맞는 행동 문장 생성
 
     action_sentence = make_action_sentence(
         disaster_type=disaster_type,
         has_local_alert=has_local_alert
     )
 
+    # 간단한 공유 메시지
+
     if tone == "short":
+
         if has_local_alert:
-            first_line = f"나 {user_status}해요. 현재 {region}에 {disaster_type} 위험 알림이 있어 확인했습니다."
-        else:
-            first_line = f"나 {user_status}해요. 현재 {user_region} 주변에 직접 관련된 재난문자는 확인되지 않았습니다."
-
-        if include_shelter and shelter_info["name"] != "추천 대피소 없음":
-            message = (
-                f"[SafeNavi 안심 공유]\n"
-                f"{first_line}\n"
-                f"가까운 대피소는 {shelter_info['name']}이며, 현재 위치에서 {format_distance(shelter_info['distance_km'])} 떨어져 있습니다.\n"
-                f"{action_sentence}"
-            )
-        else:
-            message = (
-                f"[SafeNavi 안심 공유]\n"
-                f"{first_line}\n"
-                f"{action_sentence}"
+            first_line = (
+                f"{status_sentence} "
+                f"현재 {region}에 {disaster_type} 관련 "
+                f"재난 알림이 확인되었습니다."
             )
 
-        return message
+        else:
+            first_line = (
+                f"{status_sentence} "
+                f"현재 {user_region} 주변에 오늘 발송된 "
+                f"직접 관련 재난문자는 확인되지 않았습니다."
+            )
 
-    # default message
-    message_lines = []
+        message_lines = [
+            "[SafeNavi 안심 공유]",
+            first_line
+        ]
 
-    message_lines.append("[SafeNavi 안심 공유]")
-    message_lines.append(f"나 {user_status}해요.")
-    message_lines.append("")
+        if (
+            include_shelter
+            and shelter_info.get("name")
+            and shelter_info.get("name") != "추천 대피소 없음"
+        ):
+            message_lines.append(
+                f"확인한 대피소는 "
+                f"{shelter_info['name']}이며, "
+                f"현재 위치에서 "
+                f"{format_distance(shelter_info.get('distance_km'))} "
+                f"떨어져 있습니다."
+            )
+
+        message_lines.append(
+            action_sentence
+        )
+
+        return "\n".join(message_lines)
+
+   
+    # 상세 공유 메시지
+
+    message_lines = [
+        "[SafeNavi 안심 공유]",
+        status_sentence,
+        ""
+    ]
 
     if has_local_alert:
         message_lines.append(
-            f"현재 {region}에 {disaster_type} 관련 알림이 확인되었습니다."
+            f"현재 {region}에 {disaster_type} 관련 "
+            f"알림이 확인되었습니다."
         )
-        message_lines.append(f"위험도는 '{risk_level}'으로 분석되었습니다.")
+
+        message_lines.append(
+            f"위험도는 '{risk_level}'으로 분석되었습니다."
+        )
+
         message_lines.append("")
-        message_lines.append(f"재난문자 요약: {easy_summary}")
+
+        message_lines.append(
+            f"재난문자 요약: {easy_summary}"
+        )
+
     else:
         message_lines.append(
-            f"현재 {user_region} 주변에 직접 관련된 재난문자는 확인되지 않았습니다."
+            f"현재 {user_region} 주변에 오늘 발송된 "
+            f"직접 관련 재난문자는 확인되지 않았습니다."
         )
-        message_lines.append("다만 주변 상황 확인을 위해 가까운 대피소와 안전 정보를 확인했습니다.")
+
+        message_lines.append(
+            "다만 주변 상황에 대비하기 위해 "
+            "가까운 대피소와 안전 정보를 확인했습니다."
+        )
+
         message_lines.append("")
-        message_lines.append(f"안내 요약: {easy_summary}")
+
+        message_lines.append(
+            f"안내 요약: {easy_summary}"
+        )
 
     message_lines.append("")
 
-    if include_shelter and shelter_info["name"] != "추천 대피소 없음":
-        message_lines.append("[확인한 대피소]")
-        message_lines.append(f"- 대피소명: {shelter_info['name']}")
-        message_lines.append(f"- 주소: {shelter_info['address']}")
-        message_lines.append(f"- 유형: {shelter_info['shelter_type']}")
-        message_lines.append(f"- 현재 위치와의 거리: {format_distance(shelter_info['distance_km'])}")
-        message_lines.append(f"- 추천 점수: {format_score(shelter_info['recommend_score'])}")
+    
+    # 추천 대피소 정보
+
+    if (
+        include_shelter
+        and shelter_info.get("name")
+        and shelter_info.get("name") != "추천 대피소 없음"
+    ):
+        message_lines.append(
+            "[확인한 대피소]"
+        )
+
+        message_lines.append(
+            f"- 대피소명: {shelter_info.get('name', '정보 없음')}"
+        )
+
+        message_lines.append(
+            f"- 주소: {shelter_info.get('address', '정보 없음')}"
+        )
+
+        message_lines.append(
+            f"- 유형: {shelter_info.get('shelter_type', '정보 없음')}"
+        )
+
+        message_lines.append(
+            "- 현재 위치와의 거리: "
+            f"{format_distance(shelter_info.get('distance_km'))}"
+        )
+
+        message_lines.append(
+            "- 추천 점수: "
+            f"{format_score(shelter_info.get('recommend_score'))}"
+        )
+
         message_lines.append("")
 
-    message_lines.append("[내 행동]")
-    message_lines.append(action_sentence)
+    # 9. 사용자 행동 안내
+
+    message_lines.append(
+        "[내 행동]"
+    )
+
+    message_lines.append(
+        action_sentence
+    )
+
     message_lines.append("")
-    message_lines.append("걱정하지 않도록 상황이 바뀌면 다시 연락할게요.")
+
+    message_lines.append(
+        "상황이 바뀌면 다시 연락할게요."
+    )
 
     return "\n".join(message_lines)
+
+
 
 
 def save_share_message(message):

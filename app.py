@@ -408,6 +408,191 @@ def normalize_reference_item(item):
 
 def normalize_rag_result(rag_result, question=""):
     """
+    action_guide_rag.py의 결과를
+    guide.html에서 사용하는 형식으로 정리한다.
+    """
+
+    if rag_result is None:
+        return None
+
+    if not isinstance(rag_result, dict):
+        answer_text = str(rag_result)
+
+        return {
+            "disaster_type": infer_disaster_type_from_text(
+                question + " " + answer_text
+            ),
+            "situation_type": "일반 상황",
+            "summary": answer_text,
+            "answer": answer_text,
+            "immediate_actions": [],
+            "prohibited_actions": [],
+            "detail": answer_text,
+            "best_title": "",
+            "references": [],
+            "is_low_confidence": True
+        }
+
+    answer = get_first_value(
+        rag_result,
+        [
+            "answer",
+            "response",
+            "result",
+            "message",
+            "content"
+        ],
+        default=""
+    )
+
+    summary = get_first_value(
+        rag_result,
+        [
+            "summary",
+            "core_answer",
+            "direct_answer"
+        ],
+        default=""
+    )
+
+    situation_type = get_first_value(
+        rag_result,
+        [
+            "situation_type_korean",
+            "situation_type",
+            "situation",
+            "stage",
+            "context_type"
+        ],
+        default="일반 상황"
+    )
+
+    disaster_type = get_first_value(
+        rag_result,
+        [
+            "disaster_type",
+            "detected_disaster_type",
+            "query_disaster_type",
+            "main_disaster_type",
+            "disaster_category",
+            "category",
+            "type"
+        ],
+        default=""
+    )
+
+    immediate_actions = get_first_value(
+        rag_result,
+        [
+            "immediate_actions",
+            "recommended_actions",
+            "do_actions",
+            "actions"
+        ],
+        default=[]
+    )
+
+    prohibited_actions = get_first_value(
+        rag_result,
+        [
+            "prohibited_actions",
+            "dont_actions",
+            "forbidden_actions",
+            "avoid_actions"
+        ],
+        default=[]
+    )
+
+    detail = get_first_value(
+        rag_result,
+        [
+            "detail",
+            "detailed_answer",
+            "guide_content"
+        ],
+        default=""
+    )
+
+    best_title = get_first_value(
+        rag_result,
+        [
+            "best_title",
+            "matched_title",
+            "title"
+        ],
+        default=""
+    )
+
+    references = get_first_value(
+        rag_result,
+        [
+            "references",
+            "reference_list",
+            "top_guides",
+            "results",
+            "search_results",
+            "matched_guides",
+            "retrieved_guides"
+        ],
+        default=[]
+    )
+
+    normalized_references = []
+
+    if isinstance(references, list):
+        for item in references:
+            normalized_references.append(
+                normalize_reference_item(item)
+            )
+
+    if disaster_type == "":
+        if normalized_references:
+            disaster_type = normalized_references[0].get(
+                "disaster_type",
+                ""
+            )
+
+        if (
+            disaster_type == ""
+            or disaster_type == "재난유형 미분류"
+        ):
+            disaster_type = infer_disaster_type_from_text(
+                question + " " + answer
+            )
+
+    if answer == "":
+        answer = "답변을 생성하지 못했습니다."
+
+    if summary == "":
+        summary = answer
+
+    if detail == "":
+        detail = answer
+
+    if not isinstance(immediate_actions, list):
+        immediate_actions = [str(immediate_actions)]
+
+    if not isinstance(prohibited_actions, list):
+        prohibited_actions = [str(prohibited_actions)]
+
+    return {
+        "disaster_type": disaster_type,
+        "situation_type": situation_type,
+        "summary": summary,
+        "answer": answer,
+        "immediate_actions": immediate_actions,
+        "prohibited_actions": prohibited_actions,
+        "detail": detail,
+        "best_title": best_title,
+        "references": normalized_references,
+        "is_low_confidence": bool(
+            rag_result.get(
+                "is_low_confidence",
+                False
+            )
+        )
+    }
+    """
     action_guide_rag.py에서 반환한 결과를 guide.html에서 쓰기 쉬운 구조로 정리한다.
     """
 
